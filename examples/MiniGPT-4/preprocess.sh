@@ -1,0 +1,2 @@
+python build.py --model_dir /home/player/docker_data/weight/ --dtype float16 --use_gpt_attention_plugin float16 --use_gemm_plugin float16 --max_input_len 512 --max_output_len 1024 --visualize
+ python3 run.py --max_output_len 64 --tokenizer_dir /home/player/docker_data/weight/ --engine_dir ./llama_outputs/
