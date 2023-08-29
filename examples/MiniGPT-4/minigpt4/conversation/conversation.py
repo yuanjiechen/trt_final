@@ -215,3 +215,13 @@ class Chat:
         return mixed_embs
 
 
+    def forward(self,gr_img,user_message):
+        chat_state = CONV_VISION.copy()
+        img_list = []
+        llm_message = self.upload_img(gr_img, chat_state, img_list)
+        self.ask(user_message, chat_state)
+        output_text = self.answer(conv=chat_state,
+                              img_list=img_list,
+                              max_new_tokens=300,
+                              max_length=2000)[0]
+        return output_text

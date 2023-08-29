@@ -92,6 +92,7 @@ class Attention(nn.Module):
 
     def forward(self, x, rel_pos_bias=None):
         B, N, C = x.shape
+
         qkv_bias = None
         if self.q_bias is not None:
             qkv_bias = torch.cat((self.q_bias, torch.zeros_like(self.v_bias, requires_grad=False), self.v_bias))
@@ -139,19 +140,19 @@ class Block(nn.Module):
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
 
-        if init_values is not None and init_values > 0:
-            self.gamma_1 = nn.Parameter(init_values * torch.ones((dim)),requires_grad=True)
-            self.gamma_2 = nn.Parameter(init_values * torch.ones((dim)),requires_grad=True)
-        else:
-            self.gamma_1, self.gamma_2 = None, None
+        # if init_values is not None and init_values > 0:
+        #     self.gamma_1 = nn.Parameter(init_values * torch.ones((dim)),requires_grad=True)
+        #     self.gamma_2 = nn.Parameter(init_values * torch.ones((dim)),requires_grad=True)
+        # else:
+        #     self.gamma_1, self.gamma_2 = None, None
 
     def forward(self, x, rel_pos_bias=None):
-        if self.gamma_1 is None:
-            x = x + self.drop_path(self.attn(self.norm1(x), rel_pos_bias=rel_pos_bias))
-            x = x + self.drop_path(self.mlp(self.norm2(x)))
-        else:
-            x = x + self.drop_path(self.gamma_1 * self.attn(self.norm1(x), rel_pos_bias=rel_pos_bias))
-            x = x + self.drop_path(self.gamma_2 * self.mlp(self.norm2(x)))
+        # if self.gamma_1 is None:
+        x = x + self.drop_path(self.attn(self.norm1(x), rel_pos_bias=rel_pos_bias))
+        x = x + self.drop_path(self.mlp(self.norm2(x)))
+        # else:
+        #     x = x + self.drop_path(self.gamma_1 * self.attn(self.norm1(x), rel_pos_bias=rel_pos_bias))
+        #     x = x + self.drop_path(self.gamma_2 * self.mlp(self.norm2(x)))
         return x
 
 
