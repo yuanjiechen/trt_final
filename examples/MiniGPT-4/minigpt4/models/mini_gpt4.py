@@ -125,14 +125,19 @@ class MiniGPT4(Blip2Base):
         self.visual_encoder.to("cpu")
         self.visual_encoder.float()
 
-    def encode_img(self, image):
+    def encode_img(self, image, engine=None):
         device = image.device
-        if self.low_resource:
-            self.vit_to_cpu()
-            image = image.to("cpu")
+        # if self.low_resource:
+        #     self.vit_to_cpu()
+        #     image = image.to("cpu")
 
         with self.maybe_autocast():
-            image_embeds = self.ln_vision(self.visual_encoder(image)).to(device)
+            # if engine is None:
+            image_embeds_0 = self.ln_vision(self.visual_encoder(image)).to(device).float()
+            # else: 
+            print("Encode image with trt engine ......")
+            image_embeds = self.ln_vision(engine.forward(image)).to(device).float()
+            print(torch.norm(image_embeds - image_embeds_0))
             image_atts = torch.ones(image_embeds.size()[:-1], dtype=torch.long).to(device)
 
             query_tokens = self.query_tokens.expand(image_embeds.shape[0], -1, -1)

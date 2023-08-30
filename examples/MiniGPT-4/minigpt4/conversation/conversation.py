@@ -12,6 +12,7 @@ from typing import List, Tuple, Any
 
 from minigpt4.common.registry import registry
 from run import Generation
+from direct import Engine
 
 class SeparatorStyle(Enum):
     """Different separator style."""
@@ -130,9 +131,10 @@ class Chat:
         stop_words_ids = [torch.tensor([835]).to(self.device),
                           torch.tensor([2277, 29937]).to(self.device)]  # '###' can be encoded in two different ways.
         self.stopping_criteria = StoppingCriteriaList([StoppingCriteriaSub(stops=stop_words_ids)])
+        self.vit_engine = Engine("/root/workspace/trt_final/examples/MiniGPT-4/vit_outputs/vit_float16_tp0_rank0.engine")
         self.llm_trt_engine = Generation(512,
                                          'error',
-                                         '/root/workspace/trt_final/examples/llama/llama_outputs',
+                                         '/root/workspace/trt_final/examples/MiniGPT-4/llama_outputs',
                                          "/home/player/docker_data/weight/",
                                          1)
     def ask(self, text, conv):
@@ -192,7 +194,7 @@ class Chat:
                 image = image.unsqueeze(0)
             image = image.to(self.device)
 
-        image_emb, _ = self.model.encode_img(image)
+        image_emb, _ = self.model.encode_img(image.half(), self.vit_engine)
         img_list.append(image_emb)
         conv.append_message(conv.roles[0], "<Img><ImageHere></Img>")
         msg = "Received."

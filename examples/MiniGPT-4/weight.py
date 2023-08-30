@@ -176,104 +176,117 @@ def load_from_hf_llama(tensorrt_llm_llama,
     t = time.strftime('%H:%M:%S', time.gmtime(tok - tik))
     tensorrt_llm.logger.info(f'Weights loaded. Total time: {t}')
     return
-
-
-def load_from_meta_llama(
-        tensorrt_llm_llama: tensorrt_llm.models.LLaMAForCausalLM,
-        meta_ckpt_dir,
-        rank=0,
-        tensor_parallel=1,
-        dtype="float32",
-        multi_query_mode=False):
-
-    def permute(w, nH, d, dH):
-        # due to MQA's wk, nH*dH != d could be true
-        return w.view(nH, dH // 2, 2, d).transpose(1, 2).reshape(nH * dH, d)
-
-    if not hasattr(load_from_meta_llama, "saved_embed"):
-        load_from_meta_llama.saved_embed = None
-
-    def gather_embedding(cur_embed, name: str):
-        if tensor_parallel == 1:
-            return cur_embed
-        if load_from_meta_llama.saved_embed is None:
-            embeds = [None] * tensor_parallel
-            embeds[rank] = torch.tensor(cur_embed)
-            for i in range(tensor_parallel):
-                if i != rank:
-                    ckpt = torch.load(Path(meta_ckpt_dir,
-                                           f"consolidated.{i:02d}.pth"),
-                                      map_location="cpu")
-                    embeds[i] = ckpt[name]
-            embed = torch.cat(embeds, dim=1)
-            load_from_meta_llama.saved_embed = embed.numpy(
-            )  # cache the embedding, not needed if no refit
-        return load_from_meta_llama.saved_embed
-
-    tensorrt_llm.logger.info('Loading weights from Meta LLaMA checkpoints ...')
+def load_from_hf_vit(tensorrt_llm_vit,
+                       hf_vit,
+                       rank=0,
+                       tensor_parallel=1,
+                       dtype="float32",
+                       multi_query_mode=False):
+    tensorrt_llm.logger.info('Loading weights from HF VIT...')
     tik = time.time()
-    ckpts = list(Path(meta_ckpt_dir).glob("consolidated.*.pth"))
-    num_ckpts = len(ckpts)
-    assert num_ckpts == tensor_parallel, f"TP={tensor_parallel} must be equal to the number of checkpoint files ({num_ckpts}) to use this loader."
-    # NOTE:
-    #   If multi_query_mode is enabled, this function
-    #   assumes there are `tensor_parallel` number of shards
-    #   and each shard contains only 1 KV Head (for now).
-    if multi_query_mode:
-        num_kv_heads = tensor_parallel
-    else:
-        num_kv_heads = tensorrt_llm_llama.num_heads
-    head_size = tensorrt_llm_llama.hidden_size // tensorrt_llm_llama.num_heads
-    ckpt = torch.load(Path(meta_ckpt_dir, f"consolidated.{rank:02d}.pth"),
-                      map_location="cpu")
-    for l in range(tensorrt_llm_llama.num_layers):
-        prefix = f'layers.{l}.attention.'
-        q_weight = permute(ckpt[prefix + 'wq.weight'],
-                           nH=(tensorrt_llm_llama.num_heads // tensor_parallel),
-                           d=tensorrt_llm_llama.hidden_size,
-                           dH=head_size)
-        k_weight = permute(ckpt[prefix + 'wk.weight'],
-                           nH=(num_kv_heads // tensor_parallel),
-                           d=tensorrt_llm_llama.hidden_size,
-                           dH=head_size)
-        v_weight = ckpt[prefix + 'wv.weight']
 
-        qkv_weight = torch.cat([q_weight, k_weight, v_weight], dim=0)
-        ckpt[prefix + 'qkv.weight'] = qkv_weight
+    quant_mode = getattr(tensorrt_llm_vit, 'quant_mode', QuantMode(0))
+    if quant_mode.is_int8_weight_only():
+        plugin_weight_only_quant_type = torch.int8
+    elif quant_mode.is_int4_weight_only():
+        plugin_weight_only_quant_type = torch.quint4x2
+    use_weight_only = quant_mode.is_weight_only()
+
+    model_params = dict(hf_vit.named_parameters())
+    for l in range(len(hf_vit.blocks)):
+        prefix = f'blocks.{l}.attn.'
+        k_bias_name = prefix + 'k_bias'
+        k_bias = torch.zeros_like(model_params[prefix + 'q_bias'])
+
+        model_params[k_bias_name] = k_bias
 
     torch_dtype = str_dtype_to_torch(dtype)
-    for k, v in ckpt.items():
-        v = v.to(torch_dtype).detach().cpu().numpy()
-        if "tok_embeddings" in k:
-            v = gather_embedding(
-                v, k)  # TODO: Won't be needed once Embedding layer supports TP
-            tensorrt_llm_llama.vocab_embedding.weight.value = v
-        elif "output" in k:
-            tensorrt_llm_llama.lm_head.weight.value = v
-        elif k == "norm.weight":
-            tensorrt_llm_llama.ln_f.weight.value = v
+    for k, v in model_params.items():
+        if isinstance(v, list):
+            v = [torch_to_numpy(vv.to(torch_dtype).detach().cpu()) for vv in v]
         else:
-            # layer specific weights
+            v = torch_to_numpy(v.to(torch_dtype).detach().cpu())
+            
+        if 'patch_embed.proj.weight' in k:
+            tensorrt_llm_vit.patch_embed.proj.weight.value = v
+        elif 'patch_embed.proj.bias' in k:
+            tensorrt_llm_vit.patch_embed.proj.bias.value = v
+        elif 'cls_token' in k:
+            tensorrt_llm_vit.cls_token.value = v
+        elif 'pos_embed' in k:
+            tensorrt_llm_vit.pos_embed.value = v 
+        else:
             layer_idx = extract_layer_idx(k)
             if layer_idx is None:
                 continue
             idx = int(layer_idx)
-            if idx >= tensorrt_llm_llama.num_layers:
+            if idx >= len(tensorrt_llm_vit.blocks):
                 continue
-            if 'attention_norm.weight' in k:
-                tensorrt_llm_llama.layers[idx].input_layernorm.weight.value = v
-            elif 'ffn_norm.weight' in k:
-                tensorrt_llm_llama.layers[idx].post_layernorm.weight.value = v
-            elif 'feed_forward.w3.weight' in k:
-                tensorrt_llm_llama.layers[idx].mlp.gate.weight.value = v
-            elif 'feed_forward.w2.weight' in k:
-                tensorrt_llm_llama.layers[idx].mlp.proj.weight.value = v
-            elif 'feed_forward.w1.weight' in k:
-                tensorrt_llm_llama.layers[idx].mlp.fc.weight.value = v
-            elif 'attention.wo.weight' in k:
-                tensorrt_llm_llama.layers[idx].attention.dense.weight.value = v
-            elif 'attention.qkv.weight' in k:
-                tensorrt_llm_llama.layers[idx].attention.qkv.weight.value = v
+            if 'norm1.weight' in k:
+                tensorrt_llm_vit.blocks[idx].norm1.weight.value = v
+            elif 'norm2.weight' in k:
+                tensorrt_llm_vit.blocks[idx].norm2.weight.value = v
+            elif 'norm1.bias' in k:
+                tensorrt_llm_vit.blocks[idx].norm1.bias.value = v
+            elif 'norm2.bias' in k:
+                tensorrt_llm_vit.blocks[idx].norm2.bias.value = v
+            elif 'drop_path.weight' in k:
+                continue ##tensorrt_llm_vit.blocks[idx].norm2.weight.value = v
+            elif 'attn.qkv.weight' in k:
+                dst = tensorrt_llm_vit.blocks[idx].attn.qkv.weight
+                dst.value = v
+                # if multi_query_mode:
+                #     assert isinstance(v, list) and len(v) == 3
+                #     wq = split(v[0], tensor_parallel, rank)
+                #     wk = split(v[1], tensor_parallel, rank)
+                #     wv = split(v[2], tensor_parallel, rank)
+                #     split_v = np.concatenate((wq, wk, wv))
+                # else:
+                #     q_emb = v.shape[0] // 3
+                #     model_emb = v.shape[1]
+                #     v = v.reshape(3, q_emb, model_emb)
+                #     split_v = split(v, tensor_parallel, rank, dim=1)
+                #     split_v = split_v.reshape(3 * (q_emb // tensor_parallel),
+                #                               model_emb)
+                # if use_weight_only:
+                #     v = np.ascontiguousarray(split_v.transpose())
+                #     processed_torch_weights, torch_weight_scales = torch.ops.fastertransformer.symmetric_quantize_last_axis_of_batched_matrix(
+                #         torch.tensor(v), plugin_weight_only_quant_type)
+                #     # workaround for trt not supporting int8 inputs in plugins currently
+                #     dst.value = processed_torch_weights.view(
+                #         dtype=torch.float32).numpy()
+                #     scales = tensorrt_llm_vit.layers[
+                #         idx].attention.qkv.per_channel_scale
+                #     scales.value = torch_weight_scales.numpy()
+                # else:
+                #    dst.value = np.ascontiguousarray(split_v)
+            elif 'attn.q_bias' in k:
+                tensorrt_llm_vit.blocks[idx].attn.q_bias.value= v
+            elif 'attn.k_bias' in k:
+                tensorrt_llm_vit.blocks[idx].attn.k_bias.value= v
+            elif 'attn.v_bias' in k:
+                tensorrt_llm_vit.blocks[idx].attn.v_bias.value= v
+            elif 'attn.attn_drop.weight' in k:
+                continue ##tensorrt_llm_vit.blocks[idx].attn.v_bias.weight.value= v
+            elif 'attn.proj.weight' in k:
+                tensorrt_llm_vit.blocks[idx].attn.proj.weight.value= v
+            elif 'attn.proj.bias' in k:
+                tensorrt_llm_vit.blocks[idx].attn.proj.bias.value= v
+            elif 'attn.proj_drop.weight' in k:
+                continue
+            elif 'mlp.fc1.weight' in k:
+                tensorrt_llm_vit.blocks[idx].mlp.fc.weight.value= v
+            elif 'mlp.fc2.weight' in k:
+                tensorrt_llm_vit.blocks[idx].mlp.proj.weight.value = v
+            elif 'mlp.fc1.bias' in k:
+                tensorrt_llm_vit.blocks[idx].mlp.fc.bias.value= v
+            elif 'mlp.fc2.bias' in k:
+                tensorrt_llm_vit.blocks[idx].mlp.proj.bias.value = v
+            elif 'mlp.drop.weight' in k:
+                continue
+            elif 'mlp.act.weight' in k:
+                continue ##tensorrt_llm_vit.blocks[idx].attn.mlp.hidden_act = v
+            
 
     tok = time.time()
     t = time.strftime('%H:%M:%S', time.gmtime(tok - tik))

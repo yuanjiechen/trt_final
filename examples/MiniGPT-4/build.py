@@ -3,6 +3,8 @@ import json
 import os
 import time
 from pathlib import Path
+from dataclasses import dataclass
+from functools import partial
 
 import tensorrt as trt
 import torch
@@ -16,8 +18,11 @@ from tensorrt_llm.logger import logger
 from tensorrt_llm.models import weight_only_quantize
 from tensorrt_llm.network import net_guard
 from tensorrt_llm.quantization import QuantMode
+from tensorrt_llm.layers import LayerNorm
 
-from weight import load_from_hf_llama, load_from_meta_llama  # isort:skip
+from weight import load_from_hf_llama, load_from_hf_vit
+from minigpt4.models.eva_vit import create_eva_vit_g  # isort:skip
+from vit import VisionTransformer
 
 MODEL_NAME = "llama"
 
@@ -29,59 +34,55 @@ import tensorrt as trt
 from onnx import TensorProto, helper
 
 
-def trt_dtype_to_onnx(dtype):
-    if dtype == trt.float16:
-        return TensorProto.DataType.FLOAT16
-    elif dtype == trt.float32:
-        return TensorProto.DataType.FLOAT
-    elif dtype == trt.int32:
-        return TensorProto.DataType.INT32
-    else:
-        raise TypeError("%s is not supported" % dtype)
+@dataclass
+class Vicuna_args:
+    model_dir = "/home/player/docker_data/weight/"
+    meta_ckpt_dir = None
+    dtype='float16' # [float32, bfloat16, float16]
+    timing_cache = 'model.cache'
+    log_level = 'info'
+    vocab_size = 32000
+    n_layer = 32
+    n_positions = 2048
+    n_embd = 4096 # hidden_size
+    n_head = 32
+    n_kv_head = None
+    multiple_of = None
+    ffn_dim_multiplier = 1
+    inter_size = 11008
+    hidden_act = 'silu'
+    max_batch_size = 8
+    max_input_len = 512
+    max_output_len = 1024
+    use_apt_attention_plugin = 'float16' # [float32, bfloat16, float16]
+    use_gemm_plugin = 'float16' # [float32, bfloat16, float16]
+    enable_debug_output = False
+    builder_opt = None 
+    output_dir = 'llama_outputs' # output dir
+    remove_input_padding = False
+    use_weight_only = False
+    weight_only_precition = 'int8' #[int8, int4]
+    quant_mode = None
 
-
-def to_onnx(network, path):
-    inputs = []
-    for i in range(network.num_inputs):
-        network_input = network.get_input(i)
-        inputs.append(
-            helper.make_tensor_value_info(
-                network_input.name, trt_dtype_to_onnx(network_input.dtype),
-                list(network_input.shape)))
-
-    outputs = []
-    for i in range(network.num_outputs):
-        network_output = network.get_output(i)
-        outputs.append(
-            helper.make_tensor_value_info(
-                network_output.name, trt_dtype_to_onnx(network_output.dtype),
-                list(network_output.shape)))
-
-    nodes = []
-    for i in range(network.num_layers):
-        layer = network.get_layer(i)
-        layer_inputs = []
-        for j in range(layer.num_inputs):
-            ipt = layer.get_input(j)
-            if ipt is not None:
-                layer_inputs.append(layer.get_input(j).name)
-        layer_outputs = [
-            layer.get_output(j).name for j in range(layer.num_outputs)
-        ]
-        nodes.append(
-            helper.make_node(str(layer.type),
-                             name=layer.name,
-                             inputs=layer_inputs,
-                             outputs=layer_outputs,
-                             domain="com.nvidia"))
-
-    onnx_model = helper.make_model(helper.make_graph(nodes,
-                                                     'attention',
-                                                     inputs,
-                                                     outputs,
-                                                     initializer=None),
-                                   producer_name='NVIDIA')
-    onnx.save(onnx_model, path)
+@dataclass
+class ViT_args:
+    img_size = 224
+    patch_size = 14
+    in_chans = 3
+    num_classes = 1000
+    embed_dim = 1408
+    depth = 39
+    num_heads = 1408 //88
+    mlp_ratio = 4.3637
+    qkv_bias = True
+    qk_scale = None
+    norm_layer = partial(LayerNorm, eps=1e-6)
+    use_abs_pos_emb = True
+    build_opt = None
+    model_dir = ""
+    output_dir = "vit_outputs"
+    timing_cache = 'model.cache'
+    dtype = 'float16'
 
 
 def get_engine_name(model, dtype, tp_size, rank):
@@ -99,86 +100,9 @@ def serialize_engine(engine, path):
 
 
 def parse_arguments():
-    parser = argparse.ArgumentParser()
 
-    parser.add_argument('--model_dir', type=str, default=None)
-    parser.add_argument('--meta_ckpt_dir', type=str, default=None)
-    parser.add_argument('--dtype',
-                        type=str,
-                        default='float16',
-                        choices=['float32', 'bfloat16', 'float16'])
-    parser.add_argument(
-        '--timing_cache',
-        type=str,
-        default='model.cache',
-        help=
-        'The path of to read timing cache from, will be ignored if the file does not exist'
-    )
-    parser.add_argument('--log_level', type=str, default='info')
-    parser.add_argument('--vocab_size', type=int, default=32000)
-    parser.add_argument('--n_layer', type=int, default=32)
-    parser.add_argument('--n_positions', type=int, default=2048)
-    parser.add_argument('--n_embd', type=int, default=4096)
-    parser.add_argument('--n_head', type=int, default=32)
-    parser.add_argument('--n_kv_head', type=int, default=None)
-    parser.add_argument('--multiple_of', type=int, default=None)
-    parser.add_argument('--ffn_dim_multiplier', type=int, default=1)
-    parser.add_argument('--inter_size', type=int, default=11008)
-    parser.add_argument('--hidden_act', type=str, default='silu')
-    parser.add_argument('--max_batch_size', type=int, default=8)
-    parser.add_argument('--max_input_len', type=int, default=2048)
-    parser.add_argument('--max_output_len', type=int, default=512)
-    # parser.add_argument('--max_beam_width', type=int, default=1)
-    parser.add_argument('--use_gpt_attention_plugin',
-                        nargs='?',
-                        const='float16',
-                        type=str,
-                        default=False,
-                        choices=['float16', 'bfloat16', 'float32'])
-    parser.add_argument('--use_gemm_plugin',
-                        nargs='?',
-                        const='float16',
-                        type=str,
-                        default=False,
-                        choices=['float16', 'bfloat16', 'float32'])
-    parser.add_argument('--parallel_build', default=False, action='store_true')
-    parser.add_argument('--visualize', default=False, action='store_true')
-    parser.add_argument('--enable_debug_output',
-                        default=False,
-                        action='store_true')
-    parser.add_argument('--gpus_per_node', type=int, default=8)
-    parser.add_argument('--builder_opt', type=int, default=None)
-    parser.add_argument(
-        '--output_dir',
-        type=str,
-        default='llama_outputs',
-        help=
-        'The path to save the serialized engine files, timing cache file and model configs'
-    )
-    parser.add_argument('--remove_input_padding',
-                        default=False,
-                        action='store_true')
-
-    parser.add_argument(
-        '--use_weight_only',
-        default=False,
-        action="store_true",
-        help='Quantize weights for the various GEMMs to INT4/INT8.'
-        'See --weight_only_precision to set the precision')
-
-    parser.add_argument(
-        '--weight_only_precision',
-        const='int8',
-        type=str,
-        nargs='?',
-        default='int8',
-        choices=['int8', 'int4'],
-        help=
-        'Define the precision for the weights when using weight-only quantization.'
-        'You must also use --use_weight_only for that argument to have an impact.'
-    )
-
-    args = parser.parse_args()
+    args = Vicuna_args()
+    args_vit = ViT_args()
 
     if args.use_weight_only:
         args.quant_mode = QuantMode.use_weight_only(
@@ -202,7 +126,7 @@ def parse_arguments():
 
     assert args.use_gpt_attention_plugin != None, "LLaMa must use gpt attention plugin"
 
-    return args
+    return args, args_vit
 
 
 def build_rank_engine(builder: Builder,
@@ -300,8 +224,8 @@ def build_rank_engine(builder: Builder,
     return engine
 
 
-def build(rank, args):
-    torch.cuda.set_device(rank % args.gpus_per_node)
+def build(rank, args:Vicuna_args):
+    torch.cuda.set_device(0)
     tensorrt_llm.logger.set_level(args.log_level)
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
@@ -319,7 +243,7 @@ def build(rank, args):
         precision=args.dtype,
         timing_cache=args.timing_cache if cache is None else cache,
         tensor_parallel=1,#args.world_size,  # TP only
-        parallel_build=args.parallel_build,
+        parallel_build=False,
         num_layers=args.n_layer,
         num_heads=args.n_head,
         hidden_size=args.n_embd,
@@ -346,15 +270,65 @@ def build(rank, args):
         builder_config, os.path.join(args.output_dir, "model.cache"))
     assert ok, "Failed to save timing cache."
 
+def build_vit(rank, args_vit:ViT_args):
+    if not os.path.exists(args_vit.output_dir):
+        os.makedirs(args_vit.output_dir)
+
+    model_name = 'vit'
+    builder = Builder()
+    builder_config = builder.create_builder_config(
+        name=model_name,
+        precision=args_vit.dtype,
+        timing_cache=args_vit.timing_cache,
+        opt_level=args_vit.build_opt
+    )
+    builder_config.trt_builder_config.profiling_verbosity = trt.ProfilingVerbosity.DETAILED
+    engine_name = get_engine_name(model_name, args_vit.dtype, 0, 0)
+    dtype = str_dtype_to_trt(args_vit.dtype)
+    vit = VisionTransformer(img_size=args_vit.img_size,
+                            patch_size=args_vit.patch_size,
+                            in_chans=args_vit.in_chans,
+                            num_classes=args_vit.num_classes,
+                            embed_dim=args_vit.embed_dim,
+                            depth=args_vit.depth,
+                            num_heads=args_vit.num_heads,
+                            mlp_ratio=args_vit.mlp_ratio,
+                            qkv_bias=args_vit.qkv_bias,
+                            qk_scale=args_vit.qk_scale,
+                            norm_layer=args_vit.norm_layer,
+                            use_abs_pos_emb=args_vit.use_abs_pos_emb,
+                            dtype=dtype)
+
+    # load form vit here
+    vit_torch = create_eva_vit_g(img_size=args_vit.img_size)
+    load_from_hf_vit(vit, vit_torch, dtype=args_vit.dtype)
+    network = builder.create_network()
+    network.trt_network.name = engine_name
+    with net_guard(network):
+        network.set_named_parameters(vit.named_parameters())
+        inputs = vit.prepare_inputs()
+        vit(inputs)
+
+    # Network -> Engine
+    engine = builder.build_engine(network, builder_config)
+
+    config_path = os.path.join(args_vit.output_dir, 'config.json')
+    builder.save_config(builder_config, config_path)
+
+    serialize_engine(engine, os.path.join(args_vit.output_dir, engine_name))
+
+    ok = builder.save_timing_cache(
+        builder_config, os.path.join(args_vit.output_dir, "model.cache"))
+    assert ok, "Failed to save timing cache."
 
 if __name__ == '__main__':
-    args = parse_arguments()
+    args, args_vit = parse_arguments()
     logger.set_level(args.log_level)
     tik = time.time()
 
-    args.parallel_build = False
     logger.info('Serially build TensorRT engines.')
-    build(0, args)
+    # build(0, args)
+    build_vit(0, args_vit)
 
     tok = time.time()
     t = time.strftime('%H:%M:%S', time.gmtime(tok - tik))
