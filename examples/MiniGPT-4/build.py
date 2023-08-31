@@ -40,7 +40,7 @@ class Vicuna_args:
     meta_ckpt_dir = None
     dtype='float16' # [float32, bfloat16, float16]
     timing_cache = 'model.cache'
-    log_level = 'info'
+    log_level = 'verbose'
     vocab_size = 32000
     n_layer = 32
     n_positions = 2048

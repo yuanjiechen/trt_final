@@ -32,8 +32,7 @@ class Engine(object):
         #         self.inputs.append({'device': int(device_mem), 'size': int(mem_size)})#{'host': host_mem, 'device': device_mem})
         #     else:
         #         self.outputs.append({'device': int(device_mem), 'size': int(mem_size)})#{'host': host_mem, 'device': device_mem})
-        self.out_tensor = torch.zeros([1, 257, 1408], dtype=torch.float16, device=device)
-    def forward(self, img:torch.Tensor): #np.array
+    def forward(self, img:torch.Tensor, out:torch.Tensor): #np.array
 
         self.bindings[0] = int(img.data_ptr())
         # self.inputs[0]['host'] = np.ravel(img)
@@ -44,10 +43,10 @@ class Engine(object):
         # fetch outputs from gpu
         cuda.cuStreamSynchronize(self.stream)
         # self.stream.synchronize()
-        memcopy_device_to_device(self.out_tensor.data_ptr(), self.outputs[0].device, self.outputs[0].nbytes)
+        memcopy_device_to_device(out.data_ptr(), self.outputs[0].device, self.outputs[0].nbytes)
         # cuda.memcpy_dtod_async(self.out_tensor.data_ptr(), self.outputs[0]['device'], self.outputs[0]['size'], self.stream)
         # self.stream.synchronize()
-        return self.out_tensor
+        return 0 # self.out_tensor
 
 if __name__ =='__main__':
     inputs = np.random.randn(32, 3, 640, 640)

@@ -119,6 +119,7 @@ class MiniGPT4(Blip2Base):
         else:
             self.prompt_list = []
 
+        self.hf_output = torch.zeros(1, 257, 1408).half().cuda()
     def vit_to_cpu(self):
         self.ln_vision.to("cpu")
         self.ln_vision.float()
@@ -133,10 +134,13 @@ class MiniGPT4(Blip2Base):
 
         with self.maybe_autocast():
             # if engine is None:
-            image_embeds_0 = self.ln_vision(self.visual_encoder(image)).to(device).float()
+            image_embeds_0 = self.ln_vision(self.visual_encoder(image)).to(device)
             # else: 
             print("Encode image with trt engine ......")
-            image_embeds = self.ln_vision(engine.forward(image)).to(device).float()
+            out = self.hf_output
+            engine.forward(image.half(), out)
+
+            image_embeds = self.ln_vision(out).to(device)
             print(torch.norm(image_embeds - image_embeds_0))
             image_atts = torch.ones(image_embeds.size()[:-1], dtype=torch.long).to(device)
 

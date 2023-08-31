@@ -104,30 +104,30 @@ class Attention(nn.Module):
         q = q * self.scale
         attn = (q @ k.transpose(-2, -1))
 
-        if self.relative_position_bias_table is not None:
-            relative_position_bias = \
-                self.relative_position_bias_table[self.relative_position_index.view(-1)].view(
-                    self.window_size[0] * self.window_size[1] + 1,
-                    self.window_size[0] * self.window_size[1] + 1, -1)  # Wh*Ww,Wh*Ww,nH
-            relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()  # nH, Wh*Ww, Wh*Ww
-            attn = attn + relative_position_bias.unsqueeze(0)
+        # if self.relative_position_bias_table is not None:
+        #     relative_position_bias = \
+        #         self.relative_position_bias_table[self.relative_position_index.view(-1)].view(
+        #             self.window_size[0] * self.window_size[1] + 1,
+        #             self.window_size[0] * self.window_size[1] + 1, -1)  # Wh*Ww,Wh*Ww,nH
+        #     relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()  # nH, Wh*Ww, Wh*Ww
+        #     attn = attn + relative_position_bias.unsqueeze(0)
 
-        if rel_pos_bias is not None:
-            attn = attn + rel_pos_bias
+        # if rel_pos_bias is not None:
+        #     attn = attn + rel_pos_bias
         
         attn = attn.softmax(dim=-1)
-        attn = self.attn_drop(attn)
+        # attn = self.attn_drop(attn)
 
         x = (attn @ v).transpose(1, 2).reshape(B, N, -1)
         x = self.proj(x)
-        x = self.proj_drop(x)
+        # x = self.proj_drop(x)
         return x
 
 
 class Block(nn.Module):
 
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
-                 drop_path=0., init_values=None, act_layer=nn.GELU, norm_layer=nn.LayerNorm,
+                 drop_path=0., init_values=None, act_layer=partial(nn.GELU, approximate='tanh'), norm_layer=nn.LayerNorm,
                  window_size=None, attn_head_dim=None):
         super().__init__()
         self.norm1 = norm_layer(dim)
@@ -135,7 +135,7 @@ class Block(nn.Module):
             dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale,
             attn_drop=attn_drop, proj_drop=drop, window_size=window_size, attn_head_dim=attn_head_dim)
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
-        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+        self.drop_path = nn.Identity() #DropPath(drop_path) if drop_path > 0. else 
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
@@ -366,12 +366,12 @@ def create_eva_vit_g(img_size=224,drop_path_rate=0.4,use_checkpoint=False,precis
         url, check_hash=False, progress=True
     )
     state_dict = torch.load(cached_file, map_location="cpu")    
-    interpolate_pos_embed(model,state_dict)
+    # interpolate_pos_embed(model,state_dict)
     
     incompatible_keys = model.load_state_dict(state_dict, strict=False)
 #     print(incompatible_keys)
     
     if precision == "fp16":
-#         model.to("cuda") 
+        model.to("cuda") 
         convert_weights_to_fp16(model)
     return model

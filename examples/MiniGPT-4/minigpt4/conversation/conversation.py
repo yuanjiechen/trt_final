@@ -194,7 +194,7 @@ class Chat:
                 image = image.unsqueeze(0)
             image = image.to(self.device)
 
-        image_emb, _ = self.model.encode_img(image.half(), self.vit_engine)
+        image_emb, _ = self.model.encode_img(image, self.vit_engine)
         img_list.append(image_emb)
         conv.append_message(conv.roles[0], "<Img><ImageHere></Img>")
         msg = "Received."
