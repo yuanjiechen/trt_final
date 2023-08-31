@@ -2,8 +2,10 @@ IMPORTANT !!! Download vocab.npy from https://drive.google.com/file/d/1DhPCZcchi
 
 replace tensorrt_llm runtime generate.py and tensorrt_llm model llama model.py with provided files!!
 
-![trt2023 88f45956ad1d4dfcae24d8a5d344126b_页面_1](https://github.com/yuanjiechen/trt_final/assets/43607076/474bdf86-c427-4521-8c9b-fb99b0e48e98)
+![trt2023 88f45956ad1d4dfcae24d8a5d344126b_页面_1](https://github.com/yuanjiechen/trt_final/assets/43607076/a05967ac-9017-4321-8e41-c257431d2fd3)
 
-![trt2023 88f45956ad1d4dfcae24d8a5d344126b_页面_2](https://github.com/yuanjiechen/trt_final/assets/43607076/86bdbc25-2154-4671-991b-e6bd940bba43)
+![trt2023 88f45956ad1d4dfcae24d8a5d344126b_页面_2](https://github.com/yuanjiechen/trt_final/assets/43607076/f0bd87ee-1ad3-4345-a4e6-8685bb247362)
 
-![trt2023 88f45956ad1d4dfcae24d8a5d344126b_页面_3](https://github.com/yuanjiechen/trt_final/assets/43607076/f4c5cb56-858c-4ba5-b017-e8db41b2b20f)
+![trt2023 88f45956ad1d4dfcae24d8a5d344126b_页面_3](https://github.com/yuanjiechen/trt_final/assets/43607076/f1490172-f36f-480d-b2c7-fb8a69a23720)
+
+![trt2023 88f45956ad1d4dfcae24d8a5d344126b_页面_4](https://github.com/yuanjiechen/trt_final/assets/43607076/2846713d-57c4-4285-8969-557831c55f1c)
