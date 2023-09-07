@@ -1,6 +1,7 @@
 import argparse
 import os
 import random
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -86,7 +87,41 @@ def get_image(image):
         image = image.to('cuda:0')
     return image
 
+def get_quantize_label():
+    input_path = Path("/root/workspace/quantize_data")
+    label_path = Path("/root/workspace/quantize_label")
+    for npy in input_path.glob("*.npy"):
+        arr = np.load(npy)
+        tensor = torch.from_numpy(arr).cuda()
+        output_text = chat.llm_trt_engine.generate(tensor)
+        output_text = output_text.split('###')[0]  # remove the stop sign '###'
+        output_text = output_text.split('Assistant:')[-1].strip()
+        print(output_text)
+        labels = chat.model.llama_tokenizer(output_text, return_tensors="pt", add_special_tokens=False).to("cuda:0").input_ids
+        print(labels)
+        labels = labels.detach().cpu().numpy()
+        save_path = label_path.joinpath(f"{npy.name}")
+        np.save(save_path, labels)
+
+def get_test_label():
+    input_path = Path("/root/workspace/test_data")
+    label_path = Path("/root/workspace/test_label")
+    for npz in input_path.glob("*.npz"):
+        arrs = np.load(npz)
+        image = arrs['arr_0']
+        text = arrs['arr_1'][0]
+        image = torch.from_numpy(image).cuda()
+        output_text = chat.forward(image, text)
+        print(output_text)
+        labels = chat.model.llama_tokenizer(output_text, return_tensors="pt", add_special_tokens=False).to("cuda:0").input_ids
+        print(labels)
+        labels = labels.detach().cpu().numpy()
+        save_path = label_path.joinpath(f"{npz.stem}.npy")
+        np.save(save_path, labels)
+
+
 if __name__ == '__main__':
+    get_quantize_label()
     image = get_image("/workspace/trt_final/examples/MiniGPT-4/download.jpeg")
     text_input = "please discribe the picture"
     #text_input = tocuda(text_input)

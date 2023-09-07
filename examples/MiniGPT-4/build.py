@@ -63,6 +63,7 @@ class Vicuna_args:
     use_weight_only = False
     weight_only_precition = 'int8' #[int8, int4]
     quant_mode = None
+    quant_wa = False
 
 @dataclass
 class ViT_args:
@@ -107,6 +108,8 @@ def parse_arguments():
     if args.use_weight_only:
         args.quant_mode = QuantMode.use_weight_only(
             args.weight_only_precision == 'int4')
+    elif args.quant_wa:
+        args.quant_mode = QuantMode.from_description(True, True)
     else:
         args.quant_mode = QuantMode(0)
     # Since gpt_attenttion_plugin is the only way to apply RoPE now,
@@ -327,8 +330,8 @@ if __name__ == '__main__':
     tik = time.time()
 
     logger.info('Serially build TensorRT engines.')
-    # build(0, args)
-    build_vit(0, args_vit)
+    build(0, args)
+    # build_vit(0, args_vit)
 
     tok = time.time()
     t = time.strftime('%H:%M:%S', time.gmtime(tok - tik))

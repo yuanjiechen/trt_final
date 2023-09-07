@@ -36,11 +36,9 @@ def load_from_hf_llama(tensorrt_llm_llama,
     tik = time.time()
 
     quant_mode = getattr(tensorrt_llm_llama, 'quant_mode', QuantMode(0))
-    if quant_mode.is_int8_weight_only():
-        plugin_weight_only_quant_type = torch.int8
-    elif quant_mode.is_int4_weight_only():
-        plugin_weight_only_quant_type = torch.quint4x2
-    use_weight_only = quant_mode.is_weight_only()
+ 
+    use_weight_only = False#quant_mode.is_weight_only()
+    has_act_and_weight_quant = quant_mode.has_act_and_weight_quant()
 
     model_params = dict(hf_llama.named_parameters())
     for l in range(hf_llama.config.num_hidden_layers):
@@ -79,98 +77,158 @@ def load_from_hf_llama(tensorrt_llm_llama,
             idx = int(layer_idx)
             if idx >= tensorrt_llm_llama.num_layers:
                 continue
-            if 'input_layernorm.weight' in k:
-                tensorrt_llm_llama.layers[idx].input_layernorm.weight.value = v
-            elif 'post_attention_layernorm.weight' in k:
-                dst = tensorrt_llm_llama.layers[idx].post_layernorm.weight
-                dst.value = v
-            elif 'self_attn.qkv_proj.weight' in k:
-                dst = tensorrt_llm_llama.layers[idx].attention.qkv.weight
-                if multi_query_mode:
-                    assert isinstance(v, list) and len(v) == 3
-                    wq = split(v[0], tensor_parallel, rank)
-                    wk = split(v[1], tensor_parallel, rank)
-                    wv = split(v[2], tensor_parallel, rank)
-                    split_v = np.concatenate((wq, wk, wv))
-                else:
-                    q_emb = v.shape[0] // 3
-                    model_emb = v.shape[1]
-                    v = v.reshape(3, q_emb, model_emb)
+            
+            if has_act_and_weight_quant:
+                continue
+
+            else: 
+                if 'input_layernorm.weight' in k:
+                    tensorrt_llm_llama.layers[idx].input_layernorm.weight.value = v
+                elif 'post_attention_layernorm.weight' in k:
+                    dst = tensorrt_llm_llama.layers[idx].post_layernorm.weight
+                    dst.value = v
+                elif 'self_attn.qkv_proj.weight' in k:
+                    dst = tensorrt_llm_llama.layers[idx].attention.qkv.weight
+                    if multi_query_mode:
+                        assert isinstance(v, list) and len(v) == 3
+                        wq = split(v[0], tensor_parallel, rank)
+                        wk = split(v[1], tensor_parallel, rank)
+                        wv = split(v[2], tensor_parallel, rank)
+                        split_v = np.concatenate((wq, wk, wv))
+                    else:
+                        q_emb = v.shape[0] // 3
+                        model_emb = v.shape[1]
+                        v = v.reshape(3, q_emb, model_emb)
+                        split_v = split(v, tensor_parallel, rank, dim=1)
+                        split_v = split_v.reshape(3 * (q_emb // tensor_parallel),
+                                                model_emb)
+                    if use_weight_only:
+                        v = np.ascontiguousarray(split_v.transpose())
+                        processed_torch_weights, torch_weight_scales = torch.ops.fastertransformer.symmetric_quantize_last_axis_of_batched_matrix(
+                            torch.tensor(v), plugin_weight_only_quant_type)
+                        # workaround for trt not supporting int8 inputs in plugins currently
+                        dst.value = processed_torch_weights.view(
+                            dtype=torch.float32).numpy()
+                        scales = tensorrt_llm_llama.layers[
+                            idx].attention.qkv.per_channel_scale
+                        scales.value = torch_weight_scales.numpy()
+                    else:
+                        dst.value = np.ascontiguousarray(split_v)
+                elif 'self_attn.o_proj.weight' in k:
+                    dst = tensorrt_llm_llama.layers[idx].attention.dense.weight
                     split_v = split(v, tensor_parallel, rank, dim=1)
-                    split_v = split_v.reshape(3 * (q_emb // tensor_parallel),
-                                              model_emb)
-                if use_weight_only:
-                    v = np.ascontiguousarray(split_v.transpose())
-                    processed_torch_weights, torch_weight_scales = torch.ops.fastertransformer.symmetric_quantize_last_axis_of_batched_matrix(
-                        torch.tensor(v), plugin_weight_only_quant_type)
-                    # workaround for trt not supporting int8 inputs in plugins currently
-                    dst.value = processed_torch_weights.view(
-                        dtype=torch.float32).numpy()
-                    scales = tensorrt_llm_llama.layers[
-                        idx].attention.qkv.per_channel_scale
-                    scales.value = torch_weight_scales.numpy()
-                else:
-                    dst.value = np.ascontiguousarray(split_v)
-            elif 'self_attn.o_proj.weight' in k:
-                dst = tensorrt_llm_llama.layers[idx].attention.dense.weight
-                split_v = split(v, tensor_parallel, rank, dim=1)
-                if use_weight_only:
-                    v = np.ascontiguousarray(split_v.transpose())
-                    processed_torch_weights, torch_weight_scales = torch.ops.fastertransformer.symmetric_quantize_last_axis_of_batched_matrix(
-                        torch.tensor(v), plugin_weight_only_quant_type)
-                    # workaround for trt not supporting int8 inputs in plugins currently
-                    dst.value = processed_torch_weights.view(
-                        dtype=torch.float32).numpy()
-                    scales = tensorrt_llm_llama.layers[
-                        idx].attention.dense.per_channel_scale
-                    scales.value = torch_weight_scales.numpy()
-                else:
-                    dst.value = np.ascontiguousarray(split_v)
-            elif 'mlp.up_proj.weight' in k:
-                dst = tensorrt_llm_llama.layers[idx].mlp.gate.weight
-                split_v = split(v, tensor_parallel, rank, dim=0)
-                if use_weight_only:
-                    v = np.ascontiguousarray(split_v.transpose())
-                    processed_torch_weights, torch_weight_scales = torch.ops.fastertransformer.symmetric_quantize_last_axis_of_batched_matrix(
-                        torch.tensor(v), plugin_weight_only_quant_type)
-                    # workaround for trt not supporting int8 inputs in plugins currently
-                    dst.value = processed_torch_weights.view(
-                        dtype=torch.float32).numpy()
-                    scales = tensorrt_llm_llama.layers[
-                        idx].mlp.gate.per_channel_scale
-                    scales.value = torch_weight_scales.numpy()
-                else:
-                    dst.value = np.ascontiguousarray(split_v)
-            elif 'mlp.down_proj.weight' in k:
-                dst = tensorrt_llm_llama.layers[idx].mlp.proj.weight
-                split_v = split(v, tensor_parallel, rank, dim=1)
-                if use_weight_only:
-                    v = np.ascontiguousarray(split_v.transpose())
-                    processed_torch_weights, torch_weight_scales = torch.ops.fastertransformer.symmetric_quantize_last_axis_of_batched_matrix(
-                        torch.tensor(v), plugin_weight_only_quant_type)
-                    # workaround for trt not supporting int8 inputs in plugins currently
-                    dst.value = processed_torch_weights.view(
-                        dtype=torch.float32).numpy()
-                    scales = tensorrt_llm_llama.layers[
-                        idx].mlp.proj.per_channel_scale
-                    scales.value = torch_weight_scales.numpy()
-                else:
-                    dst.value = np.ascontiguousarray(split_v)
-            elif 'mlp.gate_proj.weight' in k:
-                dst = tensorrt_llm_llama.layers[idx].mlp.fc.weight
-                split_v = split(v, tensor_parallel, rank, dim=0)
-                if use_weight_only:
-                    v = np.ascontiguousarray(split_v.transpose())
-                    processed_torch_weights, torch_weight_scales = torch.ops.fastertransformer.symmetric_quantize_last_axis_of_batched_matrix(
-                        torch.tensor(v), plugin_weight_only_quant_type)
-                    # workaround for trt not supporting int8 inputs in plugins currently
-                    dst.value = processed_torch_weights.view(
-                        dtype=torch.float32).numpy()
-                    scales = tensorrt_llm_llama.layers[
-                        idx].mlp.fc.per_channel_scale
-                    scales.value = torch_weight_scales.numpy()
-                else:
-                    dst.value = np.ascontiguousarray(split_v)
+                    if use_weight_only:
+                        v = np.ascontiguousarray(split_v.transpose())
+                        processed_torch_weights, torch_weight_scales = torch.ops.fastertransformer.symmetric_quantize_last_axis_of_batched_matrix(
+                            torch.tensor(v), plugin_weight_only_quant_type)
+                        # workaround for trt not supporting int8 inputs in plugins currently
+                        dst.value = processed_torch_weights.view(
+                            dtype=torch.float32).numpy()
+                        scales = tensorrt_llm_llama.layers[
+                            idx].attention.dense.per_channel_scale
+                        scales.value = torch_weight_scales.numpy()
+                    else:
+                        dst.value = np.ascontiguousarray(split_v)
+                elif 'mlp.up_proj.weight' in k:
+                    dst = tensorrt_llm_llama.layers[idx].mlp.gate.weight
+                    split_v = split(v, tensor_parallel, rank, dim=0)
+                    if use_weight_only:
+                        v = np.ascontiguousarray(split_v.transpose())
+                        processed_torch_weights, torch_weight_scales = torch.ops.fastertransformer.symmetric_quantize_last_axis_of_batched_matrix(
+                            torch.tensor(v), plugin_weight_only_quant_type)
+                        # workaround for trt not supporting int8 inputs in plugins currently
+                        dst.value = processed_torch_weights.view(
+                            dtype=torch.float32).numpy()
+                        scales = tensorrt_llm_llama.layers[
+                            idx].mlp.gate.per_channel_scale
+                        scales.value = torch_weight_scales.numpy()
+                    else:
+                        dst.value = np.ascontiguousarray(split_v)
+                elif 'mlp.down_proj.weight' in k:
+                    dst = tensorrt_llm_llama.layers[idx].mlp.proj.weight
+                    split_v = split(v, tensor_parallel, rank, dim=1)
+                    if use_weight_only:
+                        v = np.ascontiguousarray(split_v.transpose())
+                        processed_torch_weights, torch_weight_scales = torch.ops.fastertransformer.symmetric_quantize_last_axis_of_batched_matrix(
+                            torch.tensor(v), plugin_weight_only_quant_type)
+                        # workaround for trt not supporting int8 inputs in plugins currently
+                        dst.value = processed_torch_weights.view(
+                            dtype=torch.float32).numpy()
+                        scales = tensorrt_llm_llama.layers[
+                            idx].mlp.proj.per_channel_scale
+                        scales.value = torch_weight_scales.numpy()
+                    else:
+                        dst.value = np.ascontiguousarray(split_v)
+                elif 'mlp.gate_proj.weight' in k:
+                    dst = tensorrt_llm_llama.layers[idx].mlp.fc.weight
+                    split_v = split(v, tensor_parallel, rank, dim=0)
+                    if use_weight_only:
+                        v = np.ascontiguousarray(split_v.transpose())
+                        processed_torch_weights, torch_weight_scales = torch.ops.fastertransformer.symmetric_quantize_last_axis_of_batched_matrix(
+                            torch.tensor(v), plugin_weight_only_quant_type)
+                        # workaround for trt not supporting int8 inputs in plugins currently
+                        dst.value = processed_torch_weights.view(
+                            dtype=torch.float32).numpy()
+                        scales = tensorrt_llm_llama.layers[
+                            idx].mlp.fc.per_channel_scale
+                        scales.value = torch_weight_scales.numpy()
+                    else:
+                        dst.value = np.ascontiguousarray(split_v)
+    if has_act_and_weight_quant:
+        base_path = Path("/root/workspace/RPTQ4LLM-master/output/")
+        for qlayer in base_path.glob("*.pth"):
+            layer = torch.load(qlayer)
+            
+    '''
+        input_layernorm.ori_layer_norm.weight
+        input_layernorm.reorder_index
+        input_layernorm.out_quantizer.scale
+        input_layernorm.out_quantizer.round_zero_point
+
+        post_attention_layernorm.ori_layer_norm.weight
+        post_attention_layernorm.reorder_index
+        post_attention_layernorm.out_quantizer.scale
+        post_attention_layernorm.out_quantizer.round_zero_point
+
+        mlp.gate_proj.weight
+        mlp.gate_proj.bias
+        mlp.gate_proj.scale
+        mlp.gate_proj.round_zero_point
+
+        mlp.up_proj.weight
+        mlp.up_proj.bias
+        mlp.up_proj.scale
+        mlp.up_proj.round_zero_point       
+
+        mlp.down_proj.weight
+        mlp.down_proj.bias
+        mlp.down_proj.scale
+        mlp.down_proj.round_zero_point     
+        mlp.down_proj.act_quantizer.scale
+        mlp.down_proj.act_quantizer.round_zero_point
+
+        self_attn.k_proj.weight
+        self_attn.k_proj.bias
+        self_attn.k_proj.scale
+        self_attn.k_proj.round_zero_point
+
+        self_attn.v_proj.weight
+        self_attn.v_proj.bias
+        self_attn.v_proj.scale
+        self_attn.v_proj.round_zero_point
+
+        self_attn.q_proj.weight
+        self_attn.q_proj.bias
+        self_attn.q_proj.scale
+        self_attn.q_proj.round_zero_point
+
+        self_attn.o_proj.weight
+        self_attn.o_proj.bias
+        self_attn.o_proj.scale
+        self_attn.o_proj.round_zero_point
+        self_attn.o_proj.act_quantizer.scale
+        self_attn.o_proj.act_quantizer.round_zero_point
+    '''
 
     tok = time.time()
     t = time.strftime('%H:%M:%S', time.gmtime(tok - tik))
