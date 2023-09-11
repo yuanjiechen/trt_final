@@ -122,7 +122,7 @@ def get_test_label():
 
 if __name__ == '__main__':
     get_quantize_label()
-    image = get_image("/workspace/trt_final/examples/MiniGPT-4/download.jpeg")
+    image = get_image("./download.jpeg")
     text_input = "please discribe the picture"
     #text_input = tocuda(text_input)
     samples = {"image":image,

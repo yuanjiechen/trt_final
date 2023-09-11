@@ -40,7 +40,7 @@ class Vicuna_args:
     meta_ckpt_dir = None
     dtype='float16' # [float32, bfloat16, float16]
     timing_cache = 'model.cache'
-    log_level = 'verbose'
+    log_level = 'info'
     vocab_size = 32000
     n_layer = 32
     n_positions = 2048
@@ -63,7 +63,7 @@ class Vicuna_args:
     use_weight_only = False
     weight_only_precition = 'int8' #[int8, int4]
     quant_mode = None
-    quant_wa = False
+    quant_wa = True
 
 @dataclass
 class ViT_args:
@@ -108,8 +108,6 @@ def parse_arguments():
     if args.use_weight_only:
         args.quant_mode = QuantMode.use_weight_only(
             args.weight_only_precision == 'int4')
-    elif args.quant_wa:
-        args.quant_mode = QuantMode.from_description(True, True)
     else:
         args.quant_mode = QuantMode(0)
     # Since gpt_attenttion_plugin is the only way to apply RoPE now,
@@ -164,6 +162,8 @@ def build_rank_engine(builder: Builder,
         tensorrt_llm_llama = weight_only_quantize(
             tensorrt_llm_llama,
             QuantMode.use_weight_only(use_int4_weights=True))
+    elif args.quant_wa == True:
+        setattr(tensorrt_llm_llama, "quant_wa", True)
     if args.model_dir is not None:
         logger.info(f'Loading HF LLaMA ... from {args.model_dir}')
         tik = time.time()
@@ -331,7 +331,7 @@ if __name__ == '__main__':
 
     logger.info('Serially build TensorRT engines.')
     build(0, args)
-    # build_vit(0, args_vit)
+    # build_vit(0, args_vit) never open this line !!!
 
     tok = time.time()
     t = time.strftime('%H:%M:%S', time.gmtime(tok - tik))
