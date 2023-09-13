@@ -51,11 +51,11 @@ public:
 
     virtual void gemm(const int8_t* A, const int8_t* B, tk::QuantOption quantOption, const float* alphaCol,
         const float* alphaRow, void* C, int m, int n, int k, char* workspacePtr, const size_t workspaceBytes,
-        cudaStream_t stream)
+        cudaStream_t stream, const int32_t* bias)
         = 0;
 
     virtual void profileGemms(tk::QuantOption quantOption, int minM, int maxM, int n, int k, int8_t* A, int8_t* B,
-        void* C, float* alphaCol, float* alphaRow, char* workspace)
+        void* C, float* alphaCol, float* alphaRow, char* workspace, int32_t* bias)
         = 0;
 
     // Returns desired workspace size in bytes.

@@ -67,9 +67,9 @@ def parse_arguments(args):
         help="Setting this to a value > 0.0 (and <= 1.0) activates RoPE.")
     parser.add_argument('--inter_size', type=int, default=None)
     parser.add_argument('--no_bias', action="store_false")
-    parser.add_argument('--max_batch_size', type=int, default=256)
-    parser.add_argument('--max_input_len', type=int, default=200)
-    parser.add_argument('--max_output_len', type=int, default=200)
+    parser.add_argument('--max_batch_size', type=int, default=20)
+    parser.add_argument('--max_input_len', type=int, default=1024)
+    parser.add_argument('--max_output_len', type=int, default=1024)
     parser.add_argument('--max_beam_width', type=int, default=1)
     parser.add_argument(
         '--use_gpt_attention_plugin',

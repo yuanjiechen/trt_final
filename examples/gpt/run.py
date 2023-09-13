@@ -39,7 +39,7 @@ def parse_arguments():
     parser.add_argument('--tokenizer',
                         dest='tokenizer_path',
                         help="HF tokenizer config path",
-                        default='gpt2')
+                        default='/home/player/docker_data/gpt2/')
     parser.add_argument('--vocab_file',
                         help="Used for sentencepiece tokenizers")
     parser.add_argument('--num_beams',
