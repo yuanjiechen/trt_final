@@ -4,10 +4,11 @@ from pathlib import Path
 import numpy as np
 import torch
 
+import tensorrt as trt
 import tensorrt_llm
 from tensorrt_llm._utils import str_dtype_to_torch, torch_to_numpy
 from tensorrt_llm.quantization import QuantMode
-
+from tensorrt_llm.parameter import Parameter
 
 def extract_layer_idx(name):
     ss = name.split('.')
@@ -125,30 +126,30 @@ def load_from_hf_llama(tensorrt_llm_llama,
         base_path = Path("./RPTQ4LLM-master/output")
         for qlayer in base_path.glob("*.pth"):
             layer = torch.load(qlayer) # state_dict
-            layer_id = int(qlayer.stem[-1])
-
+            layer_id = int(qlayer.stem[7:])
+            
             tensorrt_llm_llama.layers[layer_id].input_layernorm.weight.value = layer["input_layernorm.ori_layer_norm.weight"].detach().cpu().numpy()
-            tensorrt_llm_llama.layers[layer_id].register_parameter("reorder_index_input", layer["input_layernorm.reorder_index"].detach().cpu().numpy())
-            tensorrt_llm_llama.layers[layer_id].input_layernorm.register_parameter("scale", layer["input_layernorm.out_quantizer.scale"].detach().cpu().numpy())
+            tensorrt_llm_llama.layers[layer_id].input_layernorm.index_input.value = layer["input_layernorm.reorder_index"].detach().cpu().numpy().astype(np.int32).flatten()
+            tensorrt_llm_llama.layers[layer_id].input_layernorm.scale = layer["input_layernorm.out_quantizer.scale"].detach().cpu().numpy()
             # tensorrt_llm_llama.layers[layer_id].input_layernorm.register_parameter("zero_point", layer["input_layernorm.out_quantizer.round_zero_point"].detach().cpu().numpy())
 
             tensorrt_llm_llama.layers[layer_id].post_layernorm.weight.value = layer["post_attention_layernorm.ori_layer_norm.weight"].detach().cpu().numpy()
-            tensorrt_llm_llama.layers[layer_id].register_parameter("reorder_index_post", layer["post_attention_layernorm.reorder_index"].detach().cpu().numpy())
-            tensorrt_llm_llama.layers[layer_id].post_layernorm.register_parameter("scale", layer["post_attention_layernorm.out_quantizer.scale"].detach().cpu().numpy())
+            tensorrt_llm_llama.layers[layer_id].post_layernorm.index_input.value = layer["post_attention_layernorm.reorder_index"].detach().cpu().numpy().astype(np.int32).flatten()
+            tensorrt_llm_llama.layers[layer_id].post_layernorm.scale = layer["post_attention_layernorm.out_quantizer.scale"].detach().cpu().numpy()
             # tensorrt_llm_llama.layers[layer_id].post_layernorm.register_parameter("zero_point", layer["post_attention_layernorm.out_quantizer.round_zero_point"].detach().cpu().numpy())
 
             tensorrt_llm_llama.layers[layer_id].mlp.fc.weight.value = layer["mlp.gate_proj.weight"].detach().cpu().numpy()
-            tensorrt_llm_llama.layers[layer_id].mlp.fc.register_parameter("scale", layer["mlp.gate_proj.scale"].detach().cpu().numpy())
+            tensorrt_llm_llama.layers[layer_id].mlp.fc.scale = layer["mlp.gate_proj.scale"].detach().cpu().numpy()
             # tensorrt_llm_llama.layers[layer_id].mlp.fc.register_parameter("zero_point", layer["mlp.gate_proj.round_zero_point"].detach().cpu().numpy())
 
             tensorrt_llm_llama.layers[layer_id].mlp.gate.weight.value = layer["mlp.up_proj.weight"].detach().cpu().numpy()
-            tensorrt_llm_llama.layers[layer_id].mlp.gate.register_parameter("scale", layer["mlp.up_proj.scale"].detach().cpu().numpy())
+            tensorrt_llm_llama.layers[layer_id].mlp.gate.scale = layer["mlp.up_proj.scale"].detach().cpu().numpy()
             # tensorrt_llm_llama.layers[layer_id].mlp.gate.register_parameter("zero_point", layer["mlp.up_proj.round_zero_point"].detach().cpu().numpy())  
 
             tensorrt_llm_llama.layers[layer_id].mlp.proj.weight.value = layer["mlp.down_proj.weight"].detach().cpu().numpy()
-            tensorrt_llm_llama.layers[layer_id].mlp.proj.register_parameter("scale", layer["mlp.down_proj.scale"].detach().cpu().numpy())
+            tensorrt_llm_llama.layers[layer_id].mlp.proj.scale = layer["mlp.down_proj.scale"].detach().cpu().numpy()
             # tensorrt_llm_llama.layers[layer_id].mlp.proj.register_parameter("zero_point", layer["mlp.down_proj.round_zero_point"].detach().cpu().numpy())  
-            tensorrt_llm_llama.layers[layer_id].mlp.proj.register_parameter("scale_A", layer["mlp.down_proj.act_quantizer.scale"].detach().cpu().numpy())
+            tensorrt_llm_llama.layers[layer_id].mlp.proj.scale_A = layer["mlp.down_proj.act_quantizer.scale"].detach().cpu().numpy()
             # tensorrt_llm_llama.layers[layer_id].mlp.proj.register_parameter("zero_point_A", layer["mlp.down_proj.act_quantizer.round_zero_point"].detach().cpu().numpy()) 
 
             k_weight = layer["self_attn.k_proj.weight"].detach().cpu().numpy()
@@ -158,19 +159,19 @@ def load_from_hf_llama(tensorrt_llm_llama,
             qkv_weight = np.concatenate([q_weight, k_weight, v_weight], axis=0)
             tensorrt_llm_llama.layers[layer_id].attention.qkv.weight.value = qkv_weight
 
-            tensorrt_llm_llama.layers[layer_id].attention.register_parameter("k_scale", layer["self_attn.k_proj.scale"].detach().cpu().numpy())
+            tensorrt_llm_llama.layers[layer_id].attention.k_scale = layer["self_attn.k_proj.scale"].detach().cpu().numpy()
             # tensorrt_llm_llama.layers[layer_id].attention.register_parameter("k_zero_point", layer["self_attn.k_proj.round_zero_point"].detach().cpu().numpy())
 
-            tensorrt_llm_llama.layers[layer_id].attention.register_parameter("v_scale", layer["self_attn.v_proj.scale"].detach().cpu().numpy())
+            tensorrt_llm_llama.layers[layer_id].attention.v_scale = layer["self_attn.v_proj.scale"].detach().cpu().numpy()
             # tensorrt_llm_llama.layers[layer_id].attention.register_parameter("v_zero_point", layer["self_attn.v_proj.round_zero_point"].detach().cpu().numpy())
 
-            tensorrt_llm_llama.layers[layer_id].attention.register_parameter("q_scale", layer["self_attn.q_proj.scale"].detach().cpu().numpy())
+            tensorrt_llm_llama.layers[layer_id].attention.q_scale = layer["self_attn.q_proj.scale"].detach().cpu().numpy()
             # tensorrt_llm_llama.layers[layer_id].attention.register_parameter("q_zero_point", layer["self_attn.q_proj.round_zero_point"].detach().cpu().numpy())
 
             tensorrt_llm_llama.layers[layer_id].attention.dense.weight.value = layer["self_attn.o_proj.weight"].detach().cpu().numpy()
-            tensorrt_llm_llama.layers[layer_id].attention.dense.register_parameter("scale", layer["self_attn.o_proj.scale"].detach().cpu().numpy())
+            tensorrt_llm_llama.layers[layer_id].attention.dense.scale = layer["self_attn.o_proj.scale"].detach().cpu().numpy()
             # tensorrt_llm_llama.layers[layer_id].attention.dense.register_parameter("zero_point", layer["self_attn.o_proj.round_zero_point"].detach().cpu().numpy())
-            tensorrt_llm_llama.layers[layer_id].attention.dense.register_parameter("scale_A", layer["self_attn.o_proj.act_quantizer.scale"].detach().cpu().numpy())
+            tensorrt_llm_llama.layers[layer_id].attention.dense.scale_A = layer["self_attn.o_proj.act_quantizer.scale"].detach().cpu().numpy()
             # tensorrt_llm_llama.layers[layer_id].attention.dense.register_parameter("zero_point_A", layer["self_attn.o_proj.act_quantizer.round_zero_point"].detach().cpu().numpy())
 
     tok = time.time()

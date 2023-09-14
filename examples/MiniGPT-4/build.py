@@ -63,7 +63,7 @@ class Vicuna_args:
     use_weight_only = False
     weight_only_precition = 'int8' #[int8, int4]
     quant_mode = None
-    quant_wa = False
+    quant_wa = True
 
 @dataclass
 class ViT_args:
@@ -154,7 +154,8 @@ def build_rank_engine(builder: Builder,
         neox_rotary_style=True,
         multi_query_mode=multi_query_mode,
         tensor_parallel=1,
-        tensor_parallel_group=list(range(1)))
+        tensor_parallel_group=list(range(1)),
+        quant_wa = args.quant_wa)
     if args.use_weight_only and args.weight_only_precision == 'int8':
         tensorrt_llm_llama = weight_only_quantize(tensorrt_llm_llama,
                                                   QuantMode.use_weight_only())
