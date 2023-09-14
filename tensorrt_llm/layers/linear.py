@@ -9,6 +9,37 @@ from ..module import Module
 from ..parameter import Parameter
 from ..plugin import _TRT_LLM_PLUGIN_NAMESPACE as TRT_LLM_PLUGIN_NAMESPACE
 
+def _w8a8gemm(input: Tensor, weights: Tensor, scales_a: Tensor,
+                      scales_b: Tensor) -> Tensor:
+
+    plg_creator = trt.get_plugin_registry().get_plugin_creator(
+        'W8A8Gemm', '1', TRT_LLM_PLUGIN_NAMESPACE)
+    assert plg_creator is not None
+
+    per_channel_scaling = trt.PluginField(
+        "has_per_channel_scaling",
+        np.array(1, dtype=np.int32),
+        trt.PluginFieldType.INT32)
+
+    per_token_scaling = trt.PluginField(
+        "has_per_token_scaling", 
+        np.array(1, dtype=np.int32),
+        trt.PluginFieldType.INT32)
+
+    pf_type = trt.PluginField(
+        "type_id", np.array([int(trt.float16)], np.int32),
+        trt.PluginFieldType.INT32)
+
+    pfc = trt.PluginFieldCollection(
+        [per_channel_scaling, per_token_scaling, pf_type])
+    gemm_plug = plg_creator.create_plugin("W8A8Gemm", pfc)
+    plug_inputs = [
+        input.trt_tensor, weights.trt_tensor, scales_a.trt_tensor,
+        scales_b.trt_tensor
+    ]
+    layer = default_trtnet().add_plugin_v2(plug_inputs, gemm_plug)
+    layer.get_input(0).set_dynamic_range(-127, 127)
+    return _create_tensor(layer.get_output(0), layer)
 
 def _gemm_plugin(input: Tensor,
                  mat2: Tensor,

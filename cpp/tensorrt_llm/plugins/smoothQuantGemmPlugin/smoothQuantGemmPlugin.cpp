@@ -212,7 +212,7 @@ int SmoothQuantGemmPlugin::enqueue(const nvinfer1::PluginTensorDesc* inputDesc,
 
     m_sqGemmRunner->gemm(reinterpret_cast<const int8_t*>(inputs[0]), reinterpret_cast<const int8_t*>(inputs[1]),
         m_quantOption, reinterpret_cast<const float*>(inputs[3]), reinterpret_cast<const float*>(inputs[2]),
-        reinterpret_cast<void*>(outputs[0]), m, n, k, reinterpret_cast<char*>(workspace), wsSize, stream);
+        reinterpret_cast<void*>(outputs[0]), m, n, k, reinterpret_cast<char*>(workspace), wsSize, stream, nullptr);
 
     return 0;
 }
@@ -335,7 +335,7 @@ void SmoothQuantGemmPlugin::configGemm()
     {
         allocateTmpData();
         m_sqGemmRunner->profileGemms(
-            m_quantOption, mMinM, mMaxM, mN, mK, mATmp, mBTmp, mCTmp, mAlphaColTmp, mAlphaRowTmp, mWorkspaceTmp);
+            m_quantOption, mMinM, mMaxM, mN, mK, mATmp, mBTmp, mCTmp, mAlphaColTmp, mAlphaRowTmp, mWorkspaceTmp, nullptr);
         m_sqGemmRunner->setMaxM(mMaxM);
         freeTmpData();
     }

@@ -36,7 +36,7 @@ from onnx import TensorProto, helper
 
 @dataclass
 class Vicuna_args:
-    model_dir = "/home/player/docker_data/weight/"
+    model_dir = "./weight/"
     meta_ckpt_dir = None
     dtype='float16' # [float32, bfloat16, float16]
     timing_cache = 'model.cache'
@@ -63,7 +63,7 @@ class Vicuna_args:
     use_weight_only = False
     weight_only_precition = 'int8' #[int8, int4]
     quant_mode = None
-    quant_wa = True
+    quant_wa = False
 
 @dataclass
 class ViT_args:
@@ -81,7 +81,7 @@ class ViT_args:
     use_abs_pos_emb = True
     build_opt = None
     model_dir = ""
-    output_dir = "vit_outputs"
+    output_dir = "llama_outputs"
     timing_cache = 'model.cache'
     dtype = 'float16'
 

@@ -25,6 +25,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Demo")
     parser.add_argument("--cfg-path", required=True, help="path to configuration file.")
     parser.add_argument("--gpu-id", type=int, default=0, help="specify the gpu to load the model.")
+    parser.add_argument("--load_torch", action="store_true", help="load torch model or trt engine")
     parser.add_argument(
         "--options",
         nargs="+",
@@ -37,7 +38,7 @@ def parse_args():
 
 
 def setup_seeds(config):
-    seed = config.run_cfg.seed + get_rank()
+    seed = 32768#config.run_cfg.seed + get_rank()
 
     random.seed(seed)
     np.random.seed(seed)
@@ -54,16 +55,16 @@ def setup_seeds(config):
 print('Initializing Chat')
 args = parse_args()
 cfg = Config(args)
-
+setup_seeds(None)
 model_config = cfg.model_cfg
 print(model_config)
 model_config.device_8bit = args.gpu_id
 model_cls = registry.get_model_class(model_config.arch)
-model = model_cls.from_config(model_config).to('cuda:{}'.format(args.gpu_id))
+model = model_cls.from_config(model_config, args.load_torch).to('cuda:{}'.format(args.gpu_id))
 
 vis_processor_cfg = cfg.datasets_cfg.cc_sbu_align.vis_processor.train
 vis_processor = registry.get_processor_class(vis_processor_cfg.name).from_config(vis_processor_cfg)
-chat = Chat(model, vis_processor, device='cuda:{}'.format(args.gpu_id))
+chat = Chat(model, vis_processor, device='cuda:{}'.format(args.gpu_id), load_torch=args.load_torch)
 print('Initialization Finished')
 
 def tocuda(vars):
@@ -123,7 +124,7 @@ def get_test_label():
 if __name__ == '__main__':
     get_quantize_label()
     image = get_image("./download.jpeg")
-    text_input = "please discribe the picture"
+    text_input = "what is the man doing in image"
     #text_input = tocuda(text_input)
     samples = {"image":image,
               "text_input":text_input,

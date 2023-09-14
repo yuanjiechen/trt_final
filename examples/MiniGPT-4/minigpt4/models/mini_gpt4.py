@@ -39,6 +39,7 @@ class MiniGPT4(Blip2Base):
         end_sym='\n',
         low_resource=False,  # use 8 bit and put vit in cpu
         device_8bit=0,  # the device of 8bit model should be set when loading and cannot be changed anymore.
+        load_torch=True,
     ):
         super().__init__()
 
@@ -85,26 +86,28 @@ class MiniGPT4(Blip2Base):
         print('Loading LLAMA')
         self.llama_tokenizer = LlamaTokenizer.from_pretrained(llama_model, use_fast=False)
         self.llama_tokenizer.pad_token = self.llama_tokenizer.eos_token
+        if load_torch:
+            if self.low_resource:
+                self.llama_model = LlamaForCausalLM.from_pretrained(
+                    llama_model,
+                    torch_dtype=torch.float16,
+                    load_in_8bit=True,
+                    device_map={'': device_8bit}
+                )
+            else:
+                self.llama_model = LlamaForCausalLM.from_pretrained(
+                    llama_model,
+                    torch_dtype=torch.float16,
+                )
+            for name, param in self.llama_model.named_parameters():
+                param.requires_grad = False
+        else: self.llama_model = None
 
-        if self.low_resource:
-            self.llama_model = LlamaForCausalLM.from_pretrained(
-                llama_model,
-                torch_dtype=torch.float16,
-                load_in_8bit=True,
-                device_map={'': device_8bit}
-            )
-        else:
-            self.llama_model = LlamaForCausalLM.from_pretrained(
-                llama_model,
-                torch_dtype=torch.float16,
-            )
 
-        for name, param in self.llama_model.named_parameters():
-            param.requires_grad = False
         print('Loading LLAMA Done')
 
         self.llama_proj = nn.Linear(
-            self.Qformer.config.hidden_size, self.llama_model.config.hidden_size
+            self.Qformer.config.hidden_size, 4096
         )
         self.max_txt_len = max_txt_len
         self.end_sym = end_sym
@@ -126,7 +129,7 @@ class MiniGPT4(Blip2Base):
         self.visual_encoder.to("cpu")
         self.visual_encoder.float()
 
-    def encode_img(self, image, engine=None):
+    def encode_img(self, image, engine=None, is_torch=True):
         device = image.device
         # if self.low_resource:
         #     self.vit_to_cpu()
@@ -134,14 +137,13 @@ class MiniGPT4(Blip2Base):
 
         with self.maybe_autocast():
             # if engine is None:
-            image_embeds_0 = self.ln_vision(self.visual_encoder(image)).to(device)
-            # else: 
-            print("Encode image with trt engine ......")
-            out = self.hf_output
-            engine.forward(image.half(), out)
+            if is_torch: image_embeds = self.ln_vision(self.visual_encoder(image)).to(device)
+            else: 
+                out = self.hf_output
+                engine.forward(image.half(), out)
+                image_embeds = self.ln_vision(out).to(device)
 
-            image_embeds = self.ln_vision(out).to(device)
-            print(torch.norm(image_embeds - image_embeds_0))
+            # print(torch.norm(image_embeds - image_embeds_0))
             image_atts = torch.ones(image_embeds.size()[:-1], dtype=torch.long).to(device)
 
             query_tokens = self.query_tokens.expand(image_embeds.shape[0], -1, -1)
@@ -229,7 +231,7 @@ class MiniGPT4(Blip2Base):
         return {"loss": loss}
 
     @classmethod
-    def from_config(cls, cfg):
+    def from_config(cls, cfg, load_torch=True):
         vit_model = cfg.get("vit_model", "eva_clip_g")
         q_former_model = cfg.get("q_former_model", "https://storage.googleapis.com/sfr-vision-language-research/LAVIS/models/BLIP2/blip2_pretrained_flant5xxl.pth")
         img_size = cfg.get("image_size")
@@ -266,6 +268,7 @@ class MiniGPT4(Blip2Base):
             end_sym=end_sym,
             low_resource=low_resource,
             device_8bit=device_8bit,
+            load_torch=load_torch
         )
 
         ckpt_path = cfg.get("ckpt", "")  # load weights of MiniGPT-4

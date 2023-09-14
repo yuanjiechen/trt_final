@@ -36,8 +36,8 @@ def parse_args():
 
 
 def setup_seeds(config):
-    seed = config.run_cfg.seed + get_rank()
-
+    seed = 32768#config.run_cfg.seed + get_rank()
+    # print(seed)
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -53,7 +53,7 @@ def setup_seeds(config):
 print('Initializing Chat')
 args = parse_args()
 cfg = Config(args)
-
+setup_seeds(cfg)
 model_config = cfg.model_cfg
 model_config.device_8bit = args.gpu_id
 model_cls = registry.get_model_class(model_config.arch)

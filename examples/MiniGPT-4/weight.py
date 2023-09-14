@@ -121,7 +121,8 @@ def load_from_hf_llama(tensorrt_llm_llama,
                     dst.value = np.ascontiguousarray(split_v)
 
     if has_act_and_weight_quant:
-        base_path = Path("/root/workspace/RPTQ4LLM-master/output/")
+        print("load quant parameter...")
+        base_path = Path("./RPTQ4LLM-master/output")
         for qlayer in base_path.glob("*.pth"):
             layer = torch.load(qlayer) # state_dict
             layer_id = int(qlayer.stem[-1])
@@ -171,49 +172,6 @@ def load_from_hf_llama(tensorrt_llm_llama,
             # tensorrt_llm_llama.layers[layer_id].attention.dense.register_parameter("zero_point", layer["self_attn.o_proj.round_zero_point"].detach().cpu().numpy())
             tensorrt_llm_llama.layers[layer_id].attention.dense.register_parameter("scale_A", layer["self_attn.o_proj.act_quantizer.scale"].detach().cpu().numpy())
             # tensorrt_llm_llama.layers[layer_id].attention.dense.register_parameter("zero_point_A", layer["self_attn.o_proj.act_quantizer.round_zero_point"].detach().cpu().numpy())
-    '''
-        input_layernorm.ori_layer_norm.weight
-        input_layernorm.reorder_index
-        input_layernorm.out_quantizer.scale
-        input_layernorm.out_quantizer.round_zero_point
-
-        post_attention_layernorm.ori_layer_norm.weight
-        post_attention_layernorm.reorder_index
-        post_attention_layernorm.out_quantizer.scale
-        post_attention_layernorm.out_quantizer.round_zero_point
-
-        mlp.gate_proj.weight
-        mlp.gate_proj.scale
-        mlp.gate_proj.round_zero_point
-
-        mlp.up_proj.weight
-        mlp.up_proj.scale
-        mlp.up_proj.round_zero_point       
-
-        mlp.down_proj.weight
-        mlp.down_proj.scale
-        mlp.down_proj.round_zero_point     
-        mlp.down_proj.act_quantizer.scale
-        mlp.down_proj.act_quantizer.round_zero_point
-
-        self_attn.k_proj.weight
-        self_attn.k_proj.scale
-        self_attn.k_proj.round_zero_point
-
-        self_attn.v_proj.weight
-        self_attn.v_proj.scale
-        self_attn.v_proj.round_zero_point
-
-        self_attn.q_proj.weight
-        self_attn.q_proj.scale
-        self_attn.q_proj.round_zero_point
-
-        self_attn.o_proj.weight
-        self_attn.o_proj.scale
-        self_attn.o_proj.round_zero_point
-        self_attn.o_proj.act_quantizer.scale
-        self_attn.o_proj.act_quantizer.round_zero_point
-    '''
 
     tok = time.time()
     t = time.strftime('%H:%M:%S', time.gmtime(tok - tik))

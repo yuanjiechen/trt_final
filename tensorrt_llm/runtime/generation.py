@@ -806,7 +806,7 @@ class GenerationSession(object):
 
         self.__setup_decoder(input_ids, scfg, input_lengths)
         if input_data is not None: self.output_datas = torch.zeros([self.output_ids.size(1), self.output_ids.size(0), input_data.size(2)], dtype=torch.half, device=input_data.device)
-        else : input_data = torch.nn.functional.embedding(input_ids, self.vocab_weight).contiguous()
+        #else : input_data = torch.nn.functional.embedding(input_ids, self.vocab_weight).contiguous()
         # 1, 153, 4096
         if not self.buffer_allocated:
             raise RuntimeError('Buffer not allocated, please call setup first!')
@@ -958,7 +958,7 @@ class GenerationSession(object):
                         max_input_length, self.max_seq_length)
                     return final_output_ids
                 
-            self.output_datas[:, :, :] = torch.nn.functional.embedding(self.output_ids.permute(1, 0).unsqueeze(0), self.vocab_weight).contiguous()
+            if input_data is not None: self.output_datas[:, :, :] = torch.nn.functional.embedding(self.output_ids.permute(1, 0).unsqueeze(0), self.vocab_weight).contiguous()
             if not step == self.max_new_tokens - 1:
                 # Set shape and address for the next step
                 model_inputs = self._prepare_generation_inputs(

@@ -51,11 +51,11 @@ public:
 
     virtual void gemm(const int8_t* A, const int8_t* B, tk::QuantOption quantOption, const float* alphaCol,
         const float* alphaRow, void* C, int m, int n, int k, char* workspacePtr, const size_t workspaceBytes,
-        cudaStream_t stream, const int32_t* bias)
+        cudaStream_t stream, const void* bias)
         = 0;
 
     virtual void profileGemms(tk::QuantOption quantOption, int minM, int maxM, int n, int k, int8_t* A, int8_t* B,
-        void* C, float* alphaCol, float* alphaRow, char* workspace, int32_t* bias)
+        void* C, float* alphaCol, float* alphaRow, char* workspace, void* bias)
         = 0;
 
     // Returns desired workspace size in bytes.
@@ -107,24 +107,24 @@ public:
 
     void gemm(const int8_t* A, const int8_t* B, tk::QuantOption quantOption, const float* alphaCol,
         const float* alphaRow, void* C, int m, int n, int k, char* workspacePtr, const size_t workspaceBytes,
-        cudaStream_t stream) override;
+        cudaStream_t stream, const void* bias);// override;
 
     void profileGemms(tk::QuantOption quantOption, int minM, int maxM, int n, int k, int8_t* A, int8_t* B, void* C,
-        float* alphaCol, float* alphaRow, char* workspace) override;
+        float* alphaCol, float* alphaRow, char* workspace, void* bias);// override;
 
     // Returns desired workspace size in bytes.
-    int getWorkspaceSize(const int m, const int n, const int k) override;
+    int getWorkspaceSize(const int m, const int n, const int k);// override;
 
 private:
     void dispatchToArch(const int8_t* A, const int8_t* B, tk::QuantOption quantOption, const float* alphaCol,
         const float* alphaRow, T* C, int m, int n, int k, tkc::CutlassGemmConfig gemmConfig, char* workspacePtr,
-        const size_t workspaceBytes, cudaStream_t stream, int* occupancy = nullptr);
+        const size_t workspaceBytes, cudaStream_t stream, const T* bias = nullptr);
 
     tkc::CutlassGemmConfig profileGemm(tk::QuantOption quant_option, int m, int n, int k, int8_t* A, int8_t* B, void* C,
-        float* alphaCol, float* alphaRow, char* workspace);
+        float* alphaCol, float* alphaRow, char* workspace, void* bias = nullptr);
 
     float profileConfig(const tkc::CutlassGemmConfig& config, tk::QuantOption quantOption, int m, int n, int k,
-        int8_t* A, int8_t* B, void* C, float* alphaCol, float* alphaRow, char* workspace);
+        int8_t* A, int8_t* B, void* C, float* alphaCol, float* alphaRow, char* workspace, void* bias = nullptr);
 
     int mSm;
     int mMultiProcessorCount;

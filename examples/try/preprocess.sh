@@ -1,1 +1,0 @@
-python build.py --meta_ckpt_dir /home/player/docker_data/llama-2-7b/ --dtype float16 --use_gpt_attention_plugin float16 --use_gemm_plugin float16 --max_input_len 128 --max_output_len 64 --visualize

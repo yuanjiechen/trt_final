@@ -5,7 +5,7 @@ import tensorrt as trt
 from ..._common import default_net
 from ..._utils import pad_vocab_size, str_dtype_to_trt
 from ...functional import (RaggedTensor, Tensor, assertion, expand_mask,
-                           gather_last_token_logits, shape)
+                           gather_last_token_logits, shape, index_select)
 from ...layers import (Attention, AttentionMaskType, ColumnLinear, Embedding,
                        GatedMLP, PositionEmbeddingType, RmsNorm)
 from ...module import Module, ModuleList
@@ -66,7 +66,7 @@ class LLaMADecoderLayer(Module):
         input_lengths = hidden_states.row_lengths
         max_input_length = hidden_states.max_row_length
         hidden_states = self.input_layernorm(hidden_states.data)
-
+        if hasattr(self, "reorder_index_input"): hidden_states = index_select(hidden_states, 2, self.reorder_index_input)
         attention_output = self.attention(
             RaggedTensor.from_row_lengths(hidden_states, input_lengths,
                                           max_input_length),
@@ -85,7 +85,7 @@ class LLaMADecoderLayer(Module):
 
         residual = hidden_states
         hidden_states = self.post_layernorm(hidden_states)
-
+        if hasattr(self, "reorder_index_post"): hidden_states = index_select(hidden_states, 2, self.reorder_index_post)
         hidden_states = self.mlp(hidden_states)
 
         hidden_states = residual + hidden_states

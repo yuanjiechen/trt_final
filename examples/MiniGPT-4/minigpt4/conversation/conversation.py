@@ -1,6 +1,7 @@
 import argparse
 import time
 from PIL import Image
+import numpy as np 
 
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, LlamaTokenizer
@@ -120,23 +121,28 @@ CONV_VISION = Conversation(
 
 
 class Chat:
-    def __init__(self, model, vis_processor, device='cuda:0'):
+    def __init__(self, model, vis_processor, device='cuda:0', load_torch=True):
         self.device = device
         self.model = model
-        self.model.llama_model.to("cpu")
-        self.model.llama_model.model.embed_tokens.to(self.device)
-        torch.cuda.empty_cache()
 
+        self.load_torch = load_torch
         self.vis_processor = vis_processor
         stop_words_ids = [torch.tensor([835]).to(self.device),
                           torch.tensor([2277, 29937]).to(self.device)]  # '###' can be encoded in two different ways.
         self.stopping_criteria = StoppingCriteriaList([StoppingCriteriaSub(stops=stop_words_ids)])
-        self.vit_engine = Engine("/root/workspace/trt_final/examples/MiniGPT-4/vit_outputs/vit_float16_tp0_rank0.engine")
-        self.llm_trt_engine = Generation(512,
-                                         'error',
-                                         '/root/workspace/trt_final/examples/MiniGPT-4/llama_outputs',
-                                         "/home/player/docker_data/weight/",
-                                         1)
+        self.vocab_weight = torch.from_numpy(np.load("./vocab.npy")).to(torch.device("cuda"),torch.half)
+        self.vocab_layer = torch.nn.Embedding(32001, 4096).cuda().half().eval()
+        self.vocab_layer.weight.data = self.vocab_weight
+        if not self.load_torch:
+            self.vit_engine = Engine("./llama_outputs/vit_float16_tp0_rank0.engine")
+            self.llm_trt_engine = Generation(512,
+                                            'error',
+                                            './llama_outputs',
+                                            "./weight/",
+                                            1)
+        else:
+            self.vit_engine = None
+            self.llm_trt_engine = None
     def ask(self, text, conv):
         if len(conv.messages) > 0 and conv.messages[-1][0] == conv.roles[0] \
                 and conv.messages[-1][1][-6:] == '</Img>':  # last message is image.
@@ -157,26 +163,27 @@ class Chat:
 
         embs = embs[:, begin_idx:]
         print(embs.size())
-        output_text = self.llm_trt_engine.generate(embs)
+        if not self.load_torch: output_text = self.llm_trt_engine.generate(embs)
         # output_text = generate(512, input_values=embs)
-        # outputs = self.model.llama_model.generate(
-        #     inputs_embeds=embs,
-        #     max_new_tokens=max_new_tokens,
-        #     stopping_criteria=self.stopping_criteria,
-        #     num_beams=num_beams,
-        #     do_sample=True,
-        #     min_length=min_length,
-        #     top_p=top_p,
-        #     repetition_penalty=repetition_penalty,
-        #     length_penalty=length_penalty,
-        #     temperature=temperature,
-        # )
-        # output_token = outputs[0]
-        # if output_token[0] == 0:  # the model might output a unknow token <unk> at the beginning. remove it
-        #     output_token = output_token[1:]
-        # if output_token[0] == 1:  # some users find that there is a start token <s> at the beginning. remove it
-        #     output_token = output_token[1:]
-        # output_text = self.model.llama_tokenizer.decode(output_token, add_special_tokens=False)
+        else :
+            outputs = self.model.llama_model.generate(
+                inputs_embeds=embs,
+                max_new_tokens=max_new_tokens,
+                stopping_criteria=self.stopping_criteria,
+                num_beams=num_beams,
+                do_sample=True,
+                min_length=min_length,
+                top_p=top_p,
+                repetition_penalty=repetition_penalty,
+                length_penalty=length_penalty,
+                temperature=temperature,
+            )
+            output_token = outputs[0]
+            if output_token[0] == 0:  # the model might output a unknow token <unk> at the beginning. remove it
+                output_token = output_token[1:]
+            if output_token[0] == 1:  # some users find that there is a start token <s> at the beginning. remove it
+                output_token = output_token[1:]
+            output_text = self.model.llama_tokenizer.decode(output_token, add_special_tokens=False)
         output_text = output_text.split('###')[0]  # remove the stop sign '###'
         output_text = output_text.split('Assistant:')[-1].strip()
         conv.messages[-1][1] = output_text
@@ -194,7 +201,7 @@ class Chat:
                 image = image.unsqueeze(0)
             image = image.to(self.device)
 
-        image_emb, _ = self.model.encode_img(image, self.vit_engine)
+        image_emb, _ = self.model.encode_img(image.half(), self.vit_engine, self.load_torch)
         img_list.append(image_emb)
         conv.append_message(conv.roles[0], "<Img><ImageHere></Img>")
         msg = "Received."
@@ -211,7 +218,7 @@ class Chat:
             # only add bos to the first seg
             for i, seg in enumerate(prompt_segs)
         ]
-        seg_embs = [self.model.llama_model.model.embed_tokens(seg_t) for seg_t in seg_tokens]
+        seg_embs = [self.vocab_layer(seg_t) for seg_t in seg_tokens]
         mixed_embs = [emb for pair in zip(seg_embs[:-1], img_list) for emb in pair] + [seg_embs[-1]]
         mixed_embs = torch.cat(mixed_embs, dim=1)
         return mixed_embs
