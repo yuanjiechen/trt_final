@@ -42,7 +42,8 @@ set(PLUGIN_LISTS
     layernormQuantizationPlugin
     ncclPlugin
     weightOnlyQuantMatmulPlugin
-    lookupPlugin)
+    lookupPlugin
+    rsmnormQuantizationPlugin)
 
 foreach(PLUGIN_ITER ${PLUGIN_LISTS})
   include_directories(${PLUGIN_ITER})
