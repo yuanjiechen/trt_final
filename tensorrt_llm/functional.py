@@ -3191,6 +3191,100 @@ def layer_norm(input: Tensor,
         layer = default_trtnet().add_plugin_v2(plug_inputs, layernorm_plug)
         return _create_tensor(layer.get_output(0), layer)
 
+def rms_normquant_reorder(input: Tensor,
+               normalized_shape: Union[int, Tuple[int]],
+               weight: Optional[Tensor] = None,
+               eps: float = 1e-06,
+               dst_index: Tensor = None,
+               scale: Tensor = None,
+               use_diff_of_squares: bool = True) -> Tensor:
+    '''
+    Add a layer-norm operation on a tensor.
+
+    That operation applies the layer-normalization to its input tensor. In its
+    simplest form, for large language models, the 'normalized_shape' should be
+    set to the hidden dimension of the activation tensor. Otherwise, it is the
+    shape of the normalized fraction of the tensor (starting from the
+    right-most dimension).
+
+    The 'weight' tensor corresponds to 'gamma' in the layer-norm formula and
+    'bias' is 'beta'. The 'eps' value is added to the variance before computing
+    the squared-root.
+
+    This implementation (when using the plugin) supports an additional flag to
+    enable/disable the use of a difference of squares ('Var = Mean(X^2) -
+    Mean(X)^2').
+
+    Parameters:
+        input : Tensor
+            The tensor to normalize.
+
+        normalized_shape : Union[int, Tuple[int]]
+            The shape of the sub-tensor that is normalized. Use 'hidden_dim' to
+            normalize the inner-most dimension of an activation tensor in LLMs.
+
+        weight : Optional[Tensor] = None
+            The 'gamma' term in layer-norm. Its shape must be
+            'normalized_shape'.
+
+        bias : Optional[Tensor] = None
+            The 'beta' term in layer-norm. Its shape must be
+            'normalized_shape'.
+
+        eps : float
+            The epsilon term to be added to the variance in the squared-root.
+            
+        dst_index : Tensor
+            The tensor to reorder weight and input.
+
+        use_diff_of_squares : bool
+            Does the plugin use the difference of squares to compute the
+            variance?
+
+    Returns:
+        The output tensor of that operation.
+    '''
+    if not default_net().plugin_config.reorder_rsmnormquant_plugin:
+        input, weight = broadcast_helper(input, weight)
+        if isinstance(normalized_shape, int):  # FIXME(kaiyu): better way?
+            axis = input.ndim() - 1
+        else:
+            axis = input.ndim() - len(normalized_shape)
+        axes_mask = 0
+        for i in range(axis, input.ndim()):
+            axes_mask |= 1 << i
+        layer = default_trtnet().add_normalization(input.trt_tensor,
+                                                   weight.trt_tensor,
+                                                   dst_index.trt_tensor, axes_mask)
+        layer.epsilon = eps
+        return _create_tensor(layer.get_output(0), layer)
+    else:
+        plg_creator = trt.get_plugin_registry().get_plugin_creator(
+            'RmsnormQuantization', '1', TRT_LLM_PLUGIN_NAMESPACE)
+        assert plg_creator is not None
+
+        eps = trt.PluginField("eps", np.array(eps, dtype=np.float16),
+                              trt.PluginFieldType.FLOAT)
+        use_diff_of_squares = trt.PluginField(
+            "use_diff_of_squares",
+            np.array([int(use_diff_of_squares)], dtype=np.int32),
+            trt.PluginFieldType.INT32)
+        p_dtype = default_net().plugin_config.reorder_rsmnormquant_plugin
+        pf_type = trt.PluginField(
+            "type_id", np.array([int(str_dtype_to_trt(p_dtype))], np.int32),
+            trt.PluginFieldType.INT32)
+        pfc = trt.PluginFieldCollection([eps, use_diff_of_squares, pf_type])
+        reorder_rsmnormquant_plug = plg_creator.create_plugin("rmsnormQuantization", pfc)
+
+        normalized_shape = [normalized_shape] if isinstance(
+            normalized_shape, int) else normalized_shape
+        if weight is None:
+            weight = constant(
+                np.ones(normalized_shape, dtype=str_dtype_to_np(p_dtype)))
+
+        plug_inputs = [input.trt_tensor, weight.trt_tensor, scale.trt_tensor, dst_index.trt_tensor]
+        layer = default_trtnet().add_plugin_v2(plug_inputs, reorder_rsmnormquant_plug)
+        return _create_tensor(layer.get_output(0), layer)
 
 def rms_norm(input: Tensor,
              normalized_shape: Union[int, Tuple[int]],
