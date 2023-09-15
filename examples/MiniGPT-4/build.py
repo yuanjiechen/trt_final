@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 from dataclasses import dataclass
 from functools import partial
+import ctypes
 
 import tensorrt as trt
 import torch
@@ -63,7 +64,7 @@ class Vicuna_args:
     use_weight_only = False
     weight_only_precition = 'int8' #[int8, int4]
     quant_mode = None
-    quant_wa = True
+    quant_wa = False
 
 @dataclass
 class ViT_args:
@@ -164,6 +165,7 @@ def build_rank_engine(builder: Builder,
             tensorrt_llm_llama,
             QuantMode.use_weight_only(use_int4_weights=True))
     elif args.quant_wa == True:
+        # ctypes.cdll.LoadLibrary("/root/workspace/trt_final/cpp/build/tensorrt_llm/libtensorrt_llm_static.a")
         setattr(tensorrt_llm_llama, "quant_wa", True)
     if args.model_dir is not None:
         logger.info(f'Loading HF LLaMA ... from {args.model_dir}')
@@ -199,6 +201,8 @@ def build_rank_engine(builder: Builder,
             dtype='float16')
     if args.remove_input_padding:
         network.plugin_config.enable_remove_input_padding()
+    if args.quant_wa:
+        network.plugin_config.set_reorder_plugin()
 
     with net_guard(network):
         # Prepare

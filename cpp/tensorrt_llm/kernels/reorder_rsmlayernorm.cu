@@ -10,10 +10,11 @@ namespace kernels
 {
 
 template <typename T>
-__global__ void layer_norm_kernel_fp16(const T *input,T *output,const T *gamma,const  T *scale,const  T *zero_point, const long *dst_index, int8_t* out_quant,const float eps, int b, int c) {
+__global__ void layer_norm_kernel_fp16(const T *input,T *output,const T *gamma,const  T *scale,const  T *zero_point, const long *dst_index, half* out_quant,const float eps, int b, int c) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int idy = blockIdx.y * blockDim.y + threadIdx.y;
-
+    constexpr auto num_elems_T = num_elems<T>::value;
+    using int8_packed_t = typename packed_as<int8_t, num_elems_T>::type;
     if (idx < b && idy < c) {
         // Calculate mean using parallel reduction
         __shared__ half shared_mean[32][33];
@@ -80,12 +81,12 @@ __global__ void layer_norm_kernel_fp16(const T *input,T *output,const T *gamma,c
         // output INT8
         // reinterpret_cast<int8_packed_t*>(normed_output_quant)[index]
         //         = cuda_cast<int8_packed_t>(cuda_cast<float_packed_t>(val) * scale_orig_quant);
-        if(with_per_token_scaling && with_zero_point){
-            reinterpret_cast<int8_t*>(out_quant)[dst_linear_idy] 
-                = cuda_cast<int8_t>(__hdiv(__hmul(normalized_value, (half)gamma[idy]), (half)scale[idy]) - (half)zero_point[idy]);
-        }else if(with_per_token_scaling){
-            reinterpret_cast<int8_t*>(out_quant)[dst_linear_idy] 
-                = cuda_cast<int8_t>(__hdiv(__hmul(normalized_value, (half)gamma[idy]), (half)scale[idy]));
+        if(with_per_token_scaling){
+            out_quant[dst_linear_idy] 
+                = __hmul(normalized_value, (half)gamma[idy]);//__hdiv(__hmul(normalized_value, (half)gamma[idy]), (half)scale[idy]);
+            out_quant[idy] = __hdiv(output[idy], (half)scale[idy]);
+            // out_quant[dst_linear_idy] 
+            //     = cuda_cast<int8_packed_t>(__hdiv(__hmul(normalized_value, (half)gamma[idy]), (half)scale[idy]));
         }
         else{
             output[dst_linear_idy] = __hmul(normalized_value, gamma[idy]);
@@ -95,7 +96,7 @@ __global__ void layer_norm_kernel_fp16(const T *input,T *output,const T *gamma,c
 }
 
 template <typename T>
-void reorder_rsm_norm_fp16(const T* input, T* output,const T *gamma,const T* scale,const T *zero_point, const long *dst_index, int8_t* out_quant ,const float eps,int b ,int c) {
+void reorder_rsm_norm_fp16(const T* input, T* output,const T *gamma,const T* scale,const T *zero_point, const long *dst_index, half* out_quant ,const float eps,int b ,int c) {
     // int b = input.size(0);
     // int c = input.size(1);
 
@@ -118,7 +119,7 @@ void reorder_rsm_norm_fp16(const T* input, T* output,const T *gamma,const T* sca
 
 #define INSTANTIATE_GENERAL_RSMNORM(T)                                                                                                        \
     template void reorder_rsm_norm_fp16(const T* input,T* output,const T *gamma,const T* scale ,const T *zero_point , const long *dst_index,  \
-    int8_t* out_quant,const float eps, int b, int c)
+    half* out_quant,const float eps, int b, int c)
 
 //INSTANTIATE_GENERAL_RSMNORM(float);
 INSTANTIATE_GENERAL_RSMNORM(half);

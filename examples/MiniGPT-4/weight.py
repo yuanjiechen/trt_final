@@ -130,12 +130,12 @@ def load_from_hf_llama(tensorrt_llm_llama,
             
             tensorrt_llm_llama.layers[layer_id].input_layernorm.weight.value = layer["input_layernorm.ori_layer_norm.weight"].detach().cpu().numpy()
             tensorrt_llm_llama.layers[layer_id].input_layernorm.index_input.value = layer["input_layernorm.reorder_index"].detach().cpu().numpy().astype(np.int32).flatten()
-            tensorrt_llm_llama.layers[layer_id].input_layernorm.scale = layer["input_layernorm.out_quantizer.scale"].detach().cpu().numpy()
+            tensorrt_llm_llama.layers[layer_id].input_layernorm.scale.value = layer["input_layernorm.out_quantizer.scale"].detach().cpu().numpy().astype(np.float32).flatten()
             # tensorrt_llm_llama.layers[layer_id].input_layernorm.register_parameter("zero_point", layer["input_layernorm.out_quantizer.round_zero_point"].detach().cpu().numpy())
 
             tensorrt_llm_llama.layers[layer_id].post_layernorm.weight.value = layer["post_attention_layernorm.ori_layer_norm.weight"].detach().cpu().numpy()
             tensorrt_llm_llama.layers[layer_id].post_layernorm.index_input.value = layer["post_attention_layernorm.reorder_index"].detach().cpu().numpy().astype(np.int32).flatten()
-            tensorrt_llm_llama.layers[layer_id].post_layernorm.scale = layer["post_attention_layernorm.out_quantizer.scale"].detach().cpu().numpy()
+            tensorrt_llm_llama.layers[layer_id].post_layernorm.scale.value = layer["post_attention_layernorm.out_quantizer.scale"].detach().cpu().numpy().astype(np.float32).flatten()
             # tensorrt_llm_llama.layers[layer_id].post_layernorm.register_parameter("zero_point", layer["post_attention_layernorm.out_quantizer.round_zero_point"].detach().cpu().numpy())
 
             tensorrt_llm_llama.layers[layer_id].mlp.fc.weight.value = layer["mlp.gate_proj.weight"].detach().cpu().numpy()

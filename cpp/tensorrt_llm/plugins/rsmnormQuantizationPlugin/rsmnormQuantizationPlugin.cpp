@@ -91,20 +91,31 @@ bool RsmnormQuantizationPlugin::supportsFormatCombination(
     const int totalPoses = 6 + static_cast<int>(mDynActScaling);
     PLUGIN_ASSERT(0 <= pos && pos < totalPoses);
     PLUGIN_ASSERT(nbInputs == 4);
+    // std::cout << pos << "  " << int32_t(inOut[pos].type )<< "  " << int32_t(inOut[pos].format) << std::endl;
     if (pos < nbInputs)
-    {
+    {   
+        
         switch (pos)
         {
-        case 0:
-        case 1:
-        case 2: return (inOut[pos].type == mType) && (inOut[pos].format == TensorFormat::kLINEAR);
-        case 3: return (inOut[pos].type == nvinfer1::DataType::kFLOAT) && (inOut[pos].format == TensorFormat::kLINEAR);
+        case 0: 
+            // std::cout << "case0  " << int32_t((inOut[pos].type == mType) && (inOut[pos].format == TensorFormat::kLINEAR)) <<std::endl;
+            return (inOut[pos].type == mType) && (inOut[pos].format == TensorFormat::kLINEAR);
+        case 1: 
+            // std::cout << "case1  " << int32_t((inOut[pos].type == mType) && (inOut[pos].format == TensorFormat::kLINEAR)) <<std::endl;
+            return (inOut[pos].type == mType) && (inOut[pos].format == TensorFormat::kLINEAR);
+        case 2: 
+            // std::cout << "case2  " << int32_t((inOut[pos].type == mType) && (inOut[pos].format == TensorFormat::kLINEAR)) <<std::endl;
+            return (inOut[pos].type == nvinfer1::DataType::kFLOAT) && (inOut[pos].format == TensorFormat::kLINEAR);
+        case 3: 
+            // std::cout << "case3  " << int32_t((inOut[pos].type == nvinfer1::DataType::kINT32) && (inOut[pos].format == TensorFormat::kLINEAR)) <<std::endl;
+            return (inOut[pos].type == nvinfer1::DataType::kINT32) && (inOut[pos].format == TensorFormat::kLINEAR);
         }
     }
     if (pos == 4)
     {
         // Quantized output
-        return (inOut[pos].type == nvinfer1::DataType::kINT8) && (inOut[pos].format == TensorFormat::kLINEAR);
+        // std::cout << "case4  " << int32_t((inOut[pos].type == nvinfer1::DataType::kINT8)) <<std::endl;
+        return (inOut[pos].type == nvinfer1::DataType::kHALF) && (inOut[pos].format == TensorFormat::kLINEAR);
     }
     // Dynamic scaling if enabled
     return (inOut[pos].type == nvinfer1::DataType::kFLOAT) && (inOut[pos].format == TensorFormat::kLINEAR);
@@ -145,7 +156,7 @@ int RsmnormQuantizationPlugin::enqueue(const nvinfer1::PluginTensorDesc* inputDe
     const int n = inputDesc[1].dims.d[0];
 
 
-    int8_t* output = reinterpret_cast<int8_t*>(outputs[0]);
+    half* output = reinterpret_cast<half*>(outputs[0]);
     float* dynamic_scale = mDynActScaling ? reinterpret_cast<float*>(outputs[1]) : nullptr;
 
     if (mType == DataType::kHALF)
