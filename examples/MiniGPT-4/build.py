@@ -56,7 +56,7 @@ class Vicuna_args:
     max_input_len = 512
     max_output_len = 1024
     use_apt_attention_plugin = 'float16' # [float32, bfloat16, float16]
-    use_gemm_plugin = 'float16' # [float32, bfloat16, float16]
+    use_gemm_plugin = False # [float32, bfloat16, float16]
     enable_debug_output = False
     builder_opt = None 
     output_dir = 'llama_outputs' # output dir
@@ -64,7 +64,7 @@ class Vicuna_args:
     use_weight_only = False
     weight_only_precition = 'int8' #[int8, int4]
     quant_mode = None
-    quant_wa = False
+    quant_wa = True
 
 @dataclass
 class ViT_args:
