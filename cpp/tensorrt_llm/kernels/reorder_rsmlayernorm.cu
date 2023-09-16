@@ -84,7 +84,7 @@ __global__ void layer_norm_kernel_fp16(const T *input,T *output,const T *gamma,c
         if(with_per_token_scaling){
             out_quant[dst_linear_idy] 
                 = __hmul(normalized_value, (half)gamma[idy]);//__hdiv(__hmul(normalized_value, (half)gamma[idy]), (half)scale[idy]);
-            out_quant[idy] = __hdiv(output[idy], (half)scale[idy]);
+            //out_quant[idy] = __hdiv(output[idy], (half)scale[idy]);
             // out_quant[dst_linear_idy] 
             //     = cuda_cast<int8_packed_t>(__hdiv(__hmul(normalized_value, (half)gamma[idy]), (half)scale[idy]));
         }

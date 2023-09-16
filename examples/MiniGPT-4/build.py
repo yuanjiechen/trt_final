@@ -56,7 +56,7 @@ class Vicuna_args:
     max_input_len = 512
     max_output_len = 1024
     use_apt_attention_plugin = 'float16' # [float32, bfloat16, float16]
-    use_gemm_plugin = False # [float32, bfloat16, float16]
+    use_gemm_plugin = 'float16' # [float32, bfloat16, float16]
     enable_debug_output = False
     builder_opt = None 
     output_dir = 'llama_outputs' # output dir
@@ -65,6 +65,7 @@ class Vicuna_args:
     weight_only_precition = 'int8' #[int8, int4]
     quant_mode = None
     quant_wa = True
+    int8_gemm = False
 
 @dataclass
 class ViT_args:
@@ -156,7 +157,8 @@ def build_rank_engine(builder: Builder,
         multi_query_mode=multi_query_mode,
         tensor_parallel=1,
         tensor_parallel_group=list(range(1)),
-        quant_wa = args.quant_wa)
+        quant_wa = args.quant_wa,
+        int8_gemm=args.int8_gemm)
     if args.use_weight_only and args.weight_only_precision == 'int8':
         tensorrt_llm_llama = weight_only_quantize(tensorrt_llm_llama,
                                                   QuantMode.use_weight_only())
@@ -167,6 +169,8 @@ def build_rank_engine(builder: Builder,
     elif args.quant_wa == True:
         # ctypes.cdll.LoadLibrary("/root/workspace/trt_final/cpp/build/tensorrt_llm/libtensorrt_llm_static.a")
         setattr(tensorrt_llm_llama, "quant_wa", True)
+    if args.int8_gemm == True:
+        setattr(tensorrt_llm_llama, "int8_gemm", True)
     if args.model_dir is not None:
         logger.info(f'Loading HF LLaMA ... from {args.model_dir}')
         tik = time.time()
@@ -261,7 +265,7 @@ def build(rank, args:Vicuna_args):
         max_batch_size=args.max_batch_size,
         max_input_len=args.max_input_len,
         max_output_len=args.max_output_len,
-        int8=args.quant_mode.has_act_and_weight_quant(),
+        int8=args.int8_gemm, #args.quant_mode.has_act_and_weight_quant(),
         opt_level=args.builder_opt,
         multi_query_mode=multi_query_mode)
     engine_name = get_engine_name(MODEL_NAME, args.dtype, 1,
