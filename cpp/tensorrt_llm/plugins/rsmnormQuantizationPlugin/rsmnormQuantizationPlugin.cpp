@@ -149,6 +149,7 @@ int RsmnormQuantizationPlugin::enqueue(const nvinfer1::PluginTensorDesc* inputDe
     int b,c;
     b = inputDesc[0].dims.d[0];
     c = inputDesc[0].dims.d[1];
+    std::cout <<inputDesc[1].dims.d[0]<<"++++"<<inputDesc[1].dims.d[1]<< std::endl;
     for (int i = 0; i < inputDesc[0].dims.nbDims - 1; ++i)
     {
         m *= inputDesc[0].dims.d[i];
@@ -192,7 +193,7 @@ nvinfer1::DataType RsmnormQuantizationPlugin::getOutputDataType(
     if (index == 0)
     {
         // Output 0 quantized output of layer norm
-        return nvinfer1::DataType::kINT8;
+        return nvinfer1::DataType::kHALF;
     }
     // Output 1 dynamic act scaling
     return nvinfer1::DataType::kFLOAT;

@@ -1,4 +1,6 @@
-from ..functional import group_norm, layer_norm, rms_norm
+import tensorrt as trt
+
+from ..functional import group_norm, layer_norm, rms_norm, rms_normquant_reorder, index_select, div, unsqueeze, mul
 from ..module import Module
 from ..parameter import Parameter
 
@@ -29,6 +31,43 @@ class LayerNorm(Module):
         bias = None if self.bias is None else self.bias.value
         return layer_norm(x, self.normalized_shape, weight, bias, self.eps)
 
+
+class RmsNorm_reindex(Module):
+
+    def __init__(self,
+                 normalized_shape,
+                 eps=1e-06,
+                 elementwise_affine=True,
+                 dtype=None,
+                 quant_wa=False):
+        super().__init__()
+        if isinstance(normalized_shape, int):
+            normalized_shape = (normalized_shape, )
+        self.normalized_shape = tuple(normalized_shape)
+        self.elementwise_affine = elementwise_affine
+        self.quant_wa = quant_wa
+        if self.elementwise_affine:
+            self.weight = Parameter(shape=self.normalized_shape, dtype=dtype)
+        else:
+            self.register_parameter('weight', None)
+
+        self.eps = eps
+
+        # if quant_wa:
+        self.index_input = Parameter(shape=normalized_shape, dtype=trt.int32)
+        self.scale = Parameter(shape=normalized_shape, dtype=trt.float32)
+
+    def forward(self, x):
+        weight = None if self.weight is None else self.weight.value
+        if self.quant_wa: 
+            return rms_normquant_reorder(x, self.normalized_shape, weight, dst_index=self.index_input.value, scale=self.scale.value)
+        else: 
+            out = rms_norm(x, self.normalized_shape, weight, self.eps)
+            out = index_select(out, 2, self.index_input.value)
+            out =  div(out, unsqueeze(unsqueeze(self.scale.value, 0), 0))
+            out =  mul(out, unsqueeze(unsqueeze(self.scale.value, 0), 0))
+            # out = out.cast(trt.int8)
+            return out
 
 class RmsNorm(Module):
 

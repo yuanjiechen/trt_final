@@ -7,9 +7,9 @@ from ..._utils import pad_vocab_size, str_dtype_to_trt
 from ...functional import (RaggedTensor, Tensor, assertion, expand_mask,
                            gather_last_token_logits, shape, index_select)
 from ...layers import (Attention, AttentionMaskType, ColumnLinear, Embedding,
-                       GatedMLP, PositionEmbeddingType, RmsNorm)
+                       GatedMLP, PositionEmbeddingType, RmsNorm, RmsNorm_reindex)
 from ...module import Module, ModuleList
-
+from ...parameter import Parameter
 
 class LLaMADecoderLayer(Module):
 
@@ -24,11 +24,13 @@ class LLaMADecoderLayer(Module):
                  neox_rotary_style=True,
                  multi_query_mode=False,
                  tp_group=None,
-                 tp_size=1):
+                 tp_size=1,
+                 quant_wa=False,
+                 int8_gemm=False):
         super().__init__()
         self._layer_id = layer_id  # useful for debugging
-        self.input_layernorm = RmsNorm(normalized_shape=hidden_size,
-                                       dtype=dtype)
+        self.input_layernorm = RmsNorm_reindex(normalized_shape=hidden_size,
+                                       dtype=dtype, quant_wa=quant_wa)
 
         self.attention = Attention(
             hidden_size,
@@ -41,7 +43,9 @@ class LLaMADecoderLayer(Module):
             neox_rotary_style=neox_rotary_style,
             multi_query_mode=multi_query_mode,
             tp_group=tp_group,
-            tp_size=tp_size)
+            tp_size=tp_size,
+            quant_wa=quant_wa,
+            int8_gemm=int8_gemm)
         if not mlp_hidden_size:
             mlp_hidden_size = hidden_size * 4
         self.mlp = GatedMLP(hidden_size=hidden_size,
@@ -50,8 +54,17 @@ class LLaMADecoderLayer(Module):
                             dtype=dtype,
                             bias=False,
                             tp_group=tp_group,
-                            tp_size=tp_size)
-        self.post_layernorm = RmsNorm(normalized_shape=hidden_size, dtype=dtype)
+                            tp_size=tp_size,
+                            quant_wa=quant_wa,
+                            int8_gemm=int8_gemm)
+        self.post_layernorm = RmsNorm_reindex(normalized_shape=hidden_size, dtype=dtype, quant_wa=quant_wa)
+
+        # if quant_wa:
+        #     self.reorder_index_input = Parameter(shape=(hidden_size, ), dtype=trt.int32)
+        #     self.reorder_index_post = Parameter(shape=(hidden_size, ), dtype=trt.int32)
+        # else:
+        #     self.register_parameter("reorder_index_input", None)
+        #     self.register_parameter("reorder_index_post", None)
 
     def forward(self,
                 hidden_states: RaggedTensor,
@@ -66,7 +79,7 @@ class LLaMADecoderLayer(Module):
         input_lengths = hidden_states.row_lengths
         max_input_length = hidden_states.max_row_length
         hidden_states = self.input_layernorm(hidden_states.data)
-        if hasattr(self, "reorder_index_input"): hidden_states = index_select(hidden_states, 2, self.reorder_index_input)
+        # if self.reorder_index_input is not None: hidden_states = index_select(hidden_states, 2, self.reorder_index_input.value)
         attention_output = self.attention(
             RaggedTensor.from_row_lengths(hidden_states, input_lengths,
                                           max_input_length),
@@ -85,7 +98,7 @@ class LLaMADecoderLayer(Module):
 
         residual = hidden_states
         hidden_states = self.post_layernorm(hidden_states)
-        if hasattr(self, "reorder_index_post"): hidden_states = index_select(hidden_states, 2, self.reorder_index_post)
+        # if self.reorder_index_post is not None: hidden_states = index_select(hidden_states, 2, self.reorder_index_post.value)
         hidden_states = self.mlp(hidden_states)
 
         hidden_states = residual + hidden_states
@@ -111,7 +124,9 @@ class LLaMAModel(Module):
                  neox_rotary_style=True,
                  tensor_parallel=1,
                  tensor_parallel_group=None,
-                 multi_query_mode=False):
+                 multi_query_mode=False,
+                 quant_wa=False,
+                 int8_gemm=False):
         super().__init__()
         # self.vocab_embedding = Embedding(vocab_size, hidden_size, dtype=dtype)
 
@@ -126,7 +141,9 @@ class LLaMAModel(Module):
                               neox_rotary_style=neox_rotary_style,
                               multi_query_mode=multi_query_mode,
                               tp_group=tensor_parallel_group,
-                              tp_size=tensor_parallel)
+                              tp_size=tensor_parallel,
+                              quant_wa=quant_wa,
+                              int8_gemm=int8_gemm)
             for i in range(num_layers)
         ])
 
@@ -194,7 +211,9 @@ class LLaMAForCausalLM(LLaMAModel):
                  neox_rotary_style=True,
                  tensor_parallel=1,
                  tensor_parallel_group=None,
-                 multi_query_mode=False):
+                 multi_query_mode=False,
+                 quant_wa=False,
+                 int8_gemm=False):
         if isinstance(dtype, str):
             self.kv_dtype = str_dtype_to_trt(dtype)
         else:
@@ -209,7 +228,7 @@ class LLaMAForCausalLM(LLaMAModel):
         super().__init__(num_layers, num_heads, hidden_size, vocab_size,
                          hidden_act, max_position_embeddings, dtype,
                          mlp_hidden_size, neox_rotary_style, tensor_parallel,
-                         tensor_parallel_group, multi_query_mode)
+                         tensor_parallel_group, multi_query_mode, quant_wa, int8_gemm)
         vocab_size_padded = pad_vocab_size(vocab_size, tensor_parallel)
         self.lm_head = ColumnLinear(hidden_size,
                                     vocab_size_padded,

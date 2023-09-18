@@ -52,20 +52,22 @@ def setup_seeds(config):
 #             Model Initialization
 # ========================================
 
-print('Initializing Chat')
-args = parse_args()
-cfg = Config(args)
-setup_seeds(None)
-model_config = cfg.model_cfg
-print(model_config)
-model_config.device_8bit = args.gpu_id
-model_cls = registry.get_model_class(model_config.arch)
-model = model_cls.from_config(model_config, args.load_torch).to('cuda:{}'.format(args.gpu_id))
+def init(torch_from_summarize=False):
+    print('Initializing Chat')
+    args = parse_args()
+    cfg = Config(args)
+    setup_seeds(None)
+    model_config = cfg.model_cfg
+    print(model_config)
+    model_config.device_8bit = args.gpu_id
+    model_cls = registry.get_model_class(model_config.arch)
+    model = model_cls.from_config(model_config, torch_from_summarize).to('cuda:{}'.format(args.gpu_id))
 
-vis_processor_cfg = cfg.datasets_cfg.cc_sbu_align.vis_processor.train
-vis_processor = registry.get_processor_class(vis_processor_cfg.name).from_config(vis_processor_cfg)
-chat = Chat(model, vis_processor, device='cuda:{}'.format(args.gpu_id), load_torch=args.load_torch)
-print('Initialization Finished')
+    vis_processor_cfg = cfg.datasets_cfg.cc_sbu_align.vis_processor.train
+    vis_processor = registry.get_processor_class(vis_processor_cfg.name).from_config(vis_processor_cfg)
+    chat = Chat(model, vis_processor, device='cuda:{}'.format(args.gpu_id), load_torch=torch_from_summarize)
+    print('Initialization Finished')
+    return chat, vis_processor
 
 def tocuda(vars):
     if isinstance(vars, torch.Tensor):
@@ -75,10 +77,10 @@ def tocuda(vars):
     else:
         raise NotImplementedError("invalid input type {} for tocuda".format(type(vars)))
 
-def get_image(image):
+def get_image(image, vis_precessor):
     if isinstance(image, str):  # is a image path
         raw_image = Image.open(image).convert('RGB')
-        image = vis_processor(raw_image).unsqueeze(0).to('cuda:0')
+        image = vis_precessor(raw_image).unsqueeze(0).to('cuda:0')
     elif isinstance(image, Image.Image):
         raw_image = image
         image = self.vis_processor(raw_image).unsqueeze(0).to('cuda:0')
@@ -88,42 +90,43 @@ def get_image(image):
         image = image.to('cuda:0')
     return image
 
-def get_quantize_label():
-    input_path = Path("/root/workspace/quantize_data")
-    label_path = Path("/root/workspace/quantize_label")
-    for npy in input_path.glob("*.npy"):
-        arr = np.load(npy)
-        tensor = torch.from_numpy(arr).cuda()
-        output_text = chat.llm_trt_engine.generate(tensor)
-        output_text = output_text.split('###')[0]  # remove the stop sign '###'
-        output_text = output_text.split('Assistant:')[-1].strip()
-        print(output_text)
-        labels = chat.model.llama_tokenizer(output_text, return_tensors="pt", add_special_tokens=False).to("cuda:0").input_ids
-        print(labels)
-        labels = labels.detach().cpu().numpy()
-        save_path = label_path.joinpath(f"{npy.name}")
-        np.save(save_path, labels)
+# def get_quantize_label():
+#     input_path = Path("/root/workspace/quantize_data")
+#     label_path = Path("/root/workspace/quantize_label")
+#     for npy in input_path.glob("*.npy"):
+#         arr = np.load(npy)
+#         tensor = torch.from_numpy(arr).cuda()
+#         output_text = chat.llm_trt_engine.generate(tensor)
+#         output_text = output_text.split('###')[0]  # remove the stop sign '###'
+#         output_text = output_text.split('Assistant:')[-1].strip()
+#         print(output_text)
+#         labels = chat.model.llama_tokenizer(output_text, return_tensors="pt", add_special_tokens=False).to("cuda:0").input_ids
+#         print(labels)
+#         labels = labels.detach().cpu().numpy()
+#         save_path = label_path.joinpath(f"{npy.name}")
+#         np.save(save_path, labels)
 
-def get_test_label():
-    input_path = Path("/root/workspace/test_data")
-    label_path = Path("/root/workspace/test_label")
-    for npz in input_path.glob("*.npz"):
-        arrs = np.load(npz)
-        image = arrs['arr_0']
-        text = arrs['arr_1'][0]
-        image = torch.from_numpy(image).cuda()
-        output_text = chat.forward(image, text)
-        print(output_text)
-        labels = chat.model.llama_tokenizer(output_text, return_tensors="pt", add_special_tokens=False).to("cuda:0").input_ids
-        print(labels)
-        labels = labels.detach().cpu().numpy()
-        save_path = label_path.joinpath(f"{npz.stem}.npy")
-        np.save(save_path, labels)
+# def get_test_label():
+#     input_path = Path("/root/workspace/test_data")
+#     label_path = Path("/root/workspace/test_label")
+#     for npz in input_path.glob("*.npz"):
+#         arrs = np.load(npz)
+#         image = arrs['arr_0']
+#         text = arrs['arr_1'][0]
+#         image = torch.from_numpy(image).cuda()
+#         output_text = chat.forward(image, text)
+#         print(output_text)
+#         labels = chat.model.llama_tokenizer(output_text, return_tensors="pt", add_special_tokens=False).to("cuda:0").input_ids
+#         print(labels)
+#         labels = labels.detach().cpu().numpy()
+#         save_path = label_path.joinpath(f"{npz.stem}.npy")
+#         np.save(save_path, labels)
 
 
 if __name__ == '__main__':
-    get_quantize_label()
-    image = get_image("./download.jpeg")
+    # get_quantize_label()
+    chat, vis_precesser = init()
+    image = get_image("./download.jpeg", vis_precesser)
     text_input = "what is the man doing in image"
     #text_input = tocuda(text_input)
     samples = {"image":image,

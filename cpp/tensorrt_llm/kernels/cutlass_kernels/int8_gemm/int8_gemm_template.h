@@ -372,16 +372,26 @@ template <typename T>
 float CutlassInt8GemmRunner<T>::profileConfig(const tkc::CutlassGemmConfig& config, tk::QuantOption quantOption, int m,
     int n, int k, int8_t* A, int8_t* B, void* C, float* alphaCol, float* alphaRow, char* workspace)
 {
-    constexpr int warmup = 5;
-    constexpr int runs = 15;
+    constexpr int warmup = 3;
+    constexpr int runs = 10;
 
     const auto workspaceBytes = getWorkspaceSize(m, n, k);
 
     cudaStream_t stream = cudaStreamDefault;
     for (int i = 0; i < warmup; ++i)
-    {
-        dispatchToArch(A, B, quantOption, alphaCol, alphaRow, reinterpret_cast<T*>(C), m, n, k, config, workspace,
+    {   
+        try
+        {
+            /* code */
+            dispatchToArch(A, B, quantOption, alphaCol, alphaRow, reinterpret_cast<T*>(C), m, n, k, config, workspace,
             workspaceBytes, stream);
+        }
+        catch(const std::exception& e)
+        {
+            std::cerr << e.what() << '\n';
+        }
+        
+
     }
 
     cudaEvent_t start;
@@ -427,14 +437,23 @@ tkc::CutlassGemmConfig CutlassInt8GemmRunner<T>::profileGemm(tk::QuantOption qua
     for (int ii = 0; ii < candidateConfigs.size(); ++ii)
     {
         tkc::CutlassGemmConfig candidateConfig = candidateConfigs[ii];
-        const float time = profileConfig(candidateConfig, quantOption, m, n, k, A, B, C, alphaCol, alphaRow, workspace);
-        if (time < bestTime)
+        try
         {
-            bestConfig = candidateConfig;
-            bestTime = time;
+            /* code */
+
+        
+            const float time = profileConfig(candidateConfig, quantOption, m, n, k, A, B, C, alphaCol, alphaRow, workspace);
+            if (time < bestTime)
+            {
+                bestConfig = candidateConfig;
+                bestTime = time;
+            }
+        }
+        catch(const std::exception& e)
+        {
+            std::cerr << e.what() << '\n';
         }
     }
-
     return bestConfig;
 }
 

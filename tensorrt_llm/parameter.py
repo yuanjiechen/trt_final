@@ -32,8 +32,8 @@ class Parameter(object):
                 v_range = 0.1
 
             # value ~ U[-1, 1]
-            value = torch.rand(
-                (shape), dtype=trt_dtype_to_torch(dtype), device='cuda') * 2 - 1
+            value = torch.ones(
+                (shape), dtype=trt_dtype_to_torch(dtype), device=torch.device('cuda')) * 2 - 1
             # value ~ U[-v_range, v_range]
             value = torch_to_numpy((value * v_range).cpu())
 

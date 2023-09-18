@@ -6,12 +6,13 @@ from .conv import Conv2d, ConvTranspose2d
 from .embedding import Embedding, PromptTuningEmbedding
 from .linear import ColumnLinear, Linear, RowLinear
 from .mlp import MLP, GatedMLP
-from .normalization import GroupNorm, LayerNorm, RmsNorm
+from .normalization import GroupNorm, LayerNorm, RmsNorm, RmsNorm_reindex
 from .pooling import AvgPool2d
 
 __all__ = [
     'LayerNorm',
     'RmsNorm',
+    'RmsNorm_reindex',
     'ColumnLinear',
     'Linear',
     'RowLinear',

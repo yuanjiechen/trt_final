@@ -12,7 +12,9 @@ class MLP(Module):
                  bias=True,
                  dtype=None,
                  tp_group=None,
-                 tp_size=1):
+                 tp_size=1,
+                 quant_wa=False,
+                 int8_gemm=False):
         super().__init__()
         if hidden_act not in ACT2FN:
             raise ValueError(
@@ -23,13 +25,17 @@ class MLP(Module):
                                dtype=dtype,
                                tp_group=tp_group,
                                tp_size=tp_size,
-                               gather_output=False)
+                               gather_output=False,
+                               quant_wa=quant_wa,
+                               int8_gemm=int8_gemm)
         self.proj = RowLinear(ffn_hidden_size,
                               hidden_size,
                               bias=bias,
                               dtype=dtype,
                               tp_group=tp_group,
-                              tp_size=tp_size)
+                              tp_size=tp_size,
+                              quant_wa=quant_wa,
+                              int8_gemm=int8_gemm)
         self.hidden_act = hidden_act
         self.dtype = dtype
 
@@ -49,21 +55,27 @@ class GatedMLP(MLP):
                  bias=True,
                  dtype=None,
                  tp_group=None,
-                 tp_size=1):
+                 tp_size=1,
+                 quant_wa=False,
+                 int8_gemm=False):
         super().__init__(hidden_size,
                          ffn_hidden_size,
                          hidden_act,
                          bias=bias,
                          dtype=dtype,
                          tp_group=tp_group,
-                         tp_size=tp_size)
+                         tp_size=tp_size,
+                         quant_wa=quant_wa,
+                         int8_gemm=int8_gemm)
         self.gate = ColumnLinear(hidden_size,
                                  ffn_hidden_size,
                                  bias=bias,
                                  dtype=dtype,
                                  tp_group=tp_group,
                                  tp_size=tp_size,
-                                 gather_output=False)
+                                 gather_output=False,
+                                 quant_wa=quant_wa,
+                                 int8_gemm=int8_gemm)
 
     def forward(self, hidden_states):
         inter = self.fc(hidden_states)

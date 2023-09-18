@@ -4,7 +4,7 @@ import tensorrt as trt
 from .._common import default_net, default_trtnet
 from .._utils import int32_array, str_dtype_to_trt
 from ..functional import (Tensor, _create_tensor, allgather, allreduce, concat,
-                          constant, matmul, shape, slice)
+                          constant, matmul, shape, slice, div, unsqueeze)
 from ..module import Module
 from ..parameter import Parameter
 from ..plugin import _TRT_LLM_PLUGIN_NAMESPACE as TRT_LLM_PLUGIN_NAMESPACE
@@ -76,14 +76,17 @@ class Linear(Module):
                  tp_group=None,
                  tp_size=1,
                  gather_output=True,
-                 share_weight=None):
+                 share_weight=None,
+                 quant_wa=False,
+                 int8_gemm=False):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features // tp_size
         self.dtype = dtype
+        self.int8_gemm = int8_gemm
 
         if not share_weight:
-            self.weight = Parameter(shape=(self.out_features, self.in_features),
+            self.weight = Parameter(shape=(self.out_features, self.in_features if not self.int8_gemm else self.in_features // 2),
                                     dtype=dtype)
         else:
             self.weight = share_weight
@@ -97,9 +100,18 @@ class Linear(Module):
         else:
             self.register_parameter('bias', None)
 
+        if int8_gemm:
+            self.scale = Parameter(shape=(out_features, ), dtype=trt.float32)
+            self.scale_A = Parameter(shape=(in_features, ), dtype=trt.float32)
+        else:
+            self.register_parameter("scale", None)
+            self.register_parameter("scale_A", None)
+
     def forward(self, x):
         if default_net().plugin_config.gemm_plugin:
             x = _gemm_plugin(x, self.weight.value, transb=True)
+        elif self.int8_gemm:
+            x = _w8a8gemm(div(x, unsqueeze(unsqueeze(self.scale_A.value, 0), 0)).cast(trt.int8), self.weight.value, self.scale.value, self.scale_A.value)
         else:
             x = matmul(x, self.weight.value, transb=True)
 
@@ -138,13 +150,16 @@ class RowLinear(Module):
                  bias=True,
                  dtype=None,
                  tp_group=None,
-                 tp_size=1):
+                 tp_size=1,
+                 quant_wa=False,
+                 int8_gemm=False):
         super().__init__()
         self.in_features = in_features // tp_size
         self.out_features = out_features
         self.dtype = dtype
+        self.int8_gemm = int8_gemm
 
-        self.weight = Parameter(shape=(self.out_features, self.in_features),
+        self.weight = Parameter(shape=(self.out_features, self.in_features if not self.int8_gemm else self.in_features // 2),
                                 dtype=dtype)
 
         if bias:
@@ -155,9 +170,18 @@ class RowLinear(Module):
         self.tp_group = tp_group
         self.tp_size = tp_size
 
+        if int8_gemm:
+            self.scale = Parameter(shape=(out_features, ), dtype=trt.float32)
+            self.scale_A = Parameter(shape=(in_features, ), dtype=trt.float32)
+        else:
+            self.register_parameter("scale", None)
+            self.register_parameter("scale_A", None)
+
     def forward(self, x):
         if default_net().plugin_config.gemm_plugin:
             x = _gemm_plugin(x, self.weight.value, transb=True)
+        elif self.int8_gemm:
+            x = _w8a8gemm(x, self.weight.value, self.scale.value, self.scale_A.value)
         else:
             x = matmul(x, self.weight.value, transb=True)
 

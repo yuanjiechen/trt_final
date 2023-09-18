@@ -63,7 +63,9 @@ class Attention(Module):
                  tp_group=None,
                  tp_size=1,
                  multi_block_mode=False,
-                 multi_query_mode=False):
+                 multi_query_mode=False,
+                 quant_wa=False,
+                 int8_gemm=False):
         super().__init__()
 
         self.attention_mask_type = attention_mask_type
@@ -117,13 +119,17 @@ class Attention(Module):
                                 dtype=dtype,
                                 tp_group=tp_group,
                                 tp_size=tp_size,
-                                gather_output=False)
+                                gather_output=False,
+                                quant_wa=quant_wa,
+                                int8_gemm=int8_gemm)
         self.dense = RowLinear(hidden_size,
                                hidden_size,
                                bias=bias,
                                dtype=dtype,
                                tp_group=tp_group,
-                               tp_size=tp_size)
+                               tp_size=tp_size,
+                               quant_wa=quant_wa,
+                               int8_gemm=int8_gemm)
 
     def forward(self,
                 hidden_states: RaggedTensor,
