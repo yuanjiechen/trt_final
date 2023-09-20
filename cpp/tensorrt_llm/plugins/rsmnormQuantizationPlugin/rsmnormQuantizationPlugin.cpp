@@ -16,6 +16,7 @@
  */
 #include "tensorrt_llm/plugins/rsmnormQuantizationPlugin/rsmnormQuantizationPlugin.h"
 #include "tensorrt_llm/kernels/reorder_rsmlayernorm.h"
+#include "cuda_runtime.h"
 
 using namespace nvinfer1;
 using namespace tensorrt_llm::kernels;
@@ -147,13 +148,20 @@ int RsmnormQuantizationPlugin::enqueue(const nvinfer1::PluginTensorDesc* inputDe
 
     int m = 1;
     int b,c;
-    b = inputDesc[0].dims.d[0];
-    c = inputDesc[0].dims.d[1];
-    std::cout <<inputDesc[1].dims.d[0]<<"++++"<<inputDesc[1].dims.d[1]<< std::endl;
+    b = inputDesc[0].dims.d[1];
+    c = inputDesc[0].dims.d[2];
+
     for (int i = 0; i < inputDesc[0].dims.nbDims - 1; ++i)
     {
         m *= inputDesc[0].dims.d[i];
     }
+    // for(int i = 0;i<4;i++){
+    //     for(int s=0;s<inputDesc[i].dims.nbDims;s++){
+    //         std::cout <<inputDesc[i].dims.d[s]<<" ----";
+    //     }
+    //     std::cout << std::endl;
+    // }
+    
     const int n = inputDesc[1].dims.d[0];
 
 
@@ -166,8 +174,15 @@ int RsmnormQuantizationPlugin::enqueue(const nvinfer1::PluginTensorDesc* inputDe
         const half* weight = reinterpret_cast<const half*>(inputs[1]);
         // const half* zero_point = reinterpret_cast<const half*>(inputs[2]);
         const half* scale = reinterpret_cast<const half*>(inputs[2]);
-        const long* dst_index = reinterpret_cast<const long*>(inputs[3]);
-        reorder_rsm_norm_fp16<half>((const half*)input,(half*)nullptr, (const half*)weight,(const half*)scale,(const half*)nullptr, dst_index, output,mEps, b, c);
+        const int32_t* dst_index = reinterpret_cast<const int32_t*>(inputs[3]);
+
+        // int32_t* host_mem = (int32_t*)malloc(sizeof(int32_t)*c);
+        // cudaMemcpy(host_mem,dst_index,sizeof(int32_t)*c,cudaMemcpyDeviceToHost);
+        // for(int i =0;i<c;i++){
+        //     std::cout<< host_mem[i] << " " ;
+        // }std::cout<< std::endl;
+ 
+        reorder_rsm_norm_fp16<half>((const half*)input,output, (const half*)weight, dst_index,mEps, b, c);
     }
     else if (mType == DataType::kFLOAT)
     {

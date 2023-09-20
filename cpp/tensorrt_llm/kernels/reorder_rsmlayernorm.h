@@ -24,10 +24,9 @@ namespace kernels
 {
 
 template <typename T>
-void reorder_rsm_norm_fp16(const T* input, T* output,const T *gamma,const T* scale ,const T *zero_point , const long *dst_index, half* out_quant, const float eps, int b, int c);
-// void reorder_rsm_norm_fp16(T* out, const T* input, const T* gamma, const T* beta, const float eps, const int tokens,
-//     const int hidden_dim, cudaStream_t stream = 0, bool use_diff_of_squares = true, const float* scale = nullptr,
-//     float* dynamic_scale = nullptr, int8_t* out_quant = nullptr);
+void reorder_rsm_norm_fp16(const T* input,T* output,const T *gamma, const int32_t *dst_index,  \
+     float eps, int b, int c);
+
 
 } // namespace kernels
 } // namespace tensorrt_llm

@@ -65,7 +65,7 @@ class Vicuna_args:
     weight_only_precition = 'int8' #[int8, int4]
     quant_mode = None
     quant_wa = True
-    int8_gemm = False
+    int8_gemm = True
 
 @dataclass
 class ViT_args:
@@ -225,7 +225,14 @@ def build_rank_engine(builder: Builder,
                 v.name = k
                 network.trt_network.mark_output(v)
                 v.dtype = kv_dtype
-
+    for i in range(network.trt_network.num_layers):
+        layer = network.trt_network.get_layer(i)
+        if layer.type == trt.LayerType.ELEMENTWISE \
+            and "SUB" not in layer.name and "MIN" not in layer.name \
+            and "SUM" not in layer.name and "EQUAL" not in layer.name and "POW" not in layer.name:
+            layer.precision = trt.float32
+            layer.set_output_type(0, trt.float32)
+            print(layer.name)
     engine = None
 
     # Network -> Engine
@@ -265,7 +272,7 @@ def build(rank, args:Vicuna_args):
         max_batch_size=args.max_batch_size,
         max_input_len=args.max_input_len,
         max_output_len=args.max_output_len,
-        int8=args.int8_gemm, #args.quant_mode.has_act_and_weight_quant(),
+        int8=False,#args.int8_gemm, #args.quant_mode.has_act_and_weight_quant(),
         opt_level=args.builder_opt,
         multi_query_mode=multi_query_mode)
     engine_name = get_engine_name(MODEL_NAME, args.dtype, 1,

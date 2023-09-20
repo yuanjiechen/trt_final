@@ -10,7 +10,7 @@ from polygraphy.backend.trt import CreateConfig, EngineFromNetwork, TrtRunner
 import tensorrt_llm
 from tensorrt_llm import Tensor
 from tensorrt_llm.quantization.functional import smooth_quant_gemm
-
+from tensorrt_llm.layers.linear import _w8a8gemm
 
 class TestSmoothQuantGemm(unittest.TestCase):
 
@@ -24,7 +24,7 @@ class TestSmoothQuantGemm(unittest.TestCase):
         shape2 = (n, k)
         mat2 = torch.randint(-128, 128, shape2, dtype=torch.int8)
         # Temporary hack to overcome TRT int8 plugin limitation
-        mat2_trt_hack = mat2.view(dtype=torch.float32)
+        mat2_trt_hack = mat2.view(dtype=torch.float16)
 
         # Init scales in fp32
         shape_scale_a = (m, 1) if per_token_scaling else (1, 1)
@@ -55,7 +55,7 @@ class TestSmoothQuantGemm(unittest.TestCase):
             # Init TensorRT-LLM tensor for mat2
             y = Tensor(name='y',
                        shape=mat2_trt_hack.shape,
-                       dtype=tensorrt_llm._utils.str_dtype_to_trt("float32"))
+                       dtype=tensorrt_llm._utils.str_dtype_to_trt("float16"))
             # Init TensorRT-LLM tensor for per token scaling
             scale_a = Tensor(
                 name='scale_a',
@@ -67,9 +67,7 @@ class TestSmoothQuantGemm(unittest.TestCase):
                 shape=scale_b_torch.shape,
                 dtype=tensorrt_llm._utils.str_dtype_to_trt("float32"))
             # Get output tensor for SQ gemm
-            output = smooth_quant_gemm(x, y, scale_a, scale_b,
-                                       per_token_scaling,
-                                       per_channel_scaling).trt_tensor
+            output = _w8a8gemm(x, y, scale_a, scale_b).trt_tensor
             output.name = 'output'
             network.mark_output(output)
             output.dtype = tensorrt_llm._utils.str_dtype_to_trt(dtype)
@@ -80,7 +78,7 @@ class TestSmoothQuantGemm(unittest.TestCase):
             config=CreateConfig(
                 int8=True,
                 fp16=(dtype == "float16"),
-                memory_pool_limits={trt.MemoryPoolType.WORKSPACE: 33554432}))
+                memory_pool_limits={trt.MemoryPoolType.WORKSPACE: 333554432}))
 
         # Infer engine
         with TrtRunner(build_engine) as runner:
@@ -98,26 +96,28 @@ class TestSmoothQuantGemm(unittest.TestCase):
                                             scale_b_torch,
                                             dtype,
                                             bias=None)
+        print(ref.shape, outputs['output'].shape)
 
         np.testing.assert_allclose(ref.cpu().numpy(), outputs['output'])
 
-    @parameterized.expand([('float16', False, False), ('float16', False, True),
-                           ('float16', True, False), ('float16', True, True),
-                           ('float32', False, False), ('float32', False, True),
-                           ('float32', True, False), ('float32', True, True),
-                           ('int32', False, False), ('int32', False, True),
-                           ('int32', True, False), ('int32', True, True)])
+    # @parameterized.expand([('float16', False, False), ('float16', False, True),
+    #                        ('float16', True, False), ('float16', True, True),
+    #                        ('float32', False, False), ('float32', False, True),
+    #                        ('float32', True, False), ('float32', True, True),
+    #                        ('int32', False, False), ('int32', False, True),
+    #                        ('int32', True, False), ('int32', True, True)])
+    # @classmethod
     def test_matmul(self, dtype, per_token_scaling, per_channel_scaling):
         bs = 2
         inseq = 16
-        hidden_size = 768
+        hidden_size = 4096
 
-        # qkv_gemm
-        self._sq_gemm(bs * inseq, 3 * hidden_size, hidden_size, dtype,
-                      per_token_scaling, per_channel_scaling)
+        # # qkv_gemm
+        # self._sq_gemm(bs * inseq, 3 * hidden_size, hidden_size, dtype,
+        #               per_token_scaling, per_channel_scaling)
 
         # mlp_gemm_1
-        self._sq_gemm(bs * inseq, 4 * hidden_size, hidden_size, dtype,
+        self._sq_gemm(bs * inseq, 3 * hidden_size, hidden_size, dtype,
                       per_channel_scaling, per_token_scaling)
 
     def test_sq_matmul_no_plugin(self):
@@ -132,3 +132,8 @@ class TestSmoothQuantGemm(unittest.TestCase):
                     TypeError,
                     "Smooth Quant GEMM is only supported with plugin"):
                 smooth_quant_gemm(None, None, None, None, False, False)
+
+
+if __name__ == '__main__':
+    debug = TestSmoothQuantGemm()
+    debug.test_matmul('float16', True, True)

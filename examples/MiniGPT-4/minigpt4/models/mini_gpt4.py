@@ -63,24 +63,28 @@ class MiniGPT4(Blip2Base):
         print('Loading VIT Done')
 
         print('Loading Q-Former')
-        self.Qformer, self.query_tokens = self.init_Qformer(
-            num_query_token, self.visual_encoder.num_features
-        )
-        self.Qformer.cls = None
-        self.Qformer.bert.embeddings.word_embeddings = None
-        self.Qformer.bert.embeddings.position_embeddings = None
-        for layer in self.Qformer.bert.encoder.layer:
-            layer.output = None
-            layer.intermediate = None
-        self.load_from_pretrained(url_or_filename=q_former_model)
-
-        if freeze_qformer:
-            for name, param in self.Qformer.named_parameters():
-                param.requires_grad = False
-            self.Qformer = self.Qformer.eval()
-            self.Qformer.train = disabled_train
-            self.query_tokens.requires_grad = False
-            logging.info("freeze Qformer")
+        if load_torch:
+            self.Qformer, self.query_tokens = self.init_Qformer(
+                num_query_token, self.visual_encoder.num_features
+            )
+            self.Qformer.cls = None
+            self.Qformer.bert.embeddings.word_embeddings = None
+            self.Qformer.bert.embeddings.position_embeddings = None
+            for layer in self.Qformer.bert.encoder.layer:
+                layer.output = None
+                layer.intermediate = None
+            self.load_from_pretrained(url_or_filename=q_former_model)
+            
+            if freeze_qformer:
+                for name, param in self.Qformer.named_parameters():
+                    param.requires_grad = False
+                self.Qformer = self.Qformer.eval()
+                self.Qformer.train = disabled_train
+                self.query_tokens.requires_grad = False
+                logging.info("freeze Qformer")
+        else:
+            self.Qformer = None
+            self.query_tokens = None
         print('Loading Q-Former Done')
 
         print('Loading LLAMA')
@@ -103,12 +107,12 @@ class MiniGPT4(Blip2Base):
                 param.requires_grad = False
         else: self.llama_model = None
 
-
         print('Loading LLAMA Done')
-
-        self.llama_proj = nn.Linear(
-            self.Qformer.config.hidden_size, 4096
-        )
+        if load_torch:
+            self.llama_proj = nn.Linear(
+                self.Qformer.config.hidden_size, 4096
+            )
+        else: self.llama_proj = None
         self.max_txt_len = max_txt_len
         self.end_sym = end_sym
 
@@ -123,13 +127,14 @@ class MiniGPT4(Blip2Base):
             self.prompt_list = []
 
         self.hf_output = torch.zeros(1, 257, 1408).half().cuda()
-    def vit_to_cpu(self):
-        self.ln_vision.to("cpu")
-        self.ln_vision.float()
-        self.visual_encoder.to("cpu")
-        self.visual_encoder.float()
+        self.qformer_output = torch.zeros(1, 32, 4096).half().cuda()
+    # def vit_to_cpu(self):
+    #     self.ln_vision.to("cpu")
+    #     self.ln_vision.float()
+    #     self.visual_encoder.to("cpu")
+    #     self.visual_encoder.float()
 
-    def encode_img(self, image, engine=None, is_torch=True):
+    def encode_img(self, image, engine=None, qformer_engine=None, is_torch=True):
         device = image.device
         # if self.low_resource:
         #     self.vit_to_cpu()
@@ -137,26 +142,30 @@ class MiniGPT4(Blip2Base):
 
         with self.maybe_autocast():
             # if engine is None:
-            if is_torch: image_embeds = self.ln_vision(self.visual_encoder(image)).to(device)
+            if is_torch: 
+                out = self.ln_vision(self.visual_encoder(image)).to(device)
+                mini_qformer = mini_Qformer(self.ln_vision, self.Qformer.bert, self.llama_proj, self.query_tokens)
+                inputs_llama = mini_qformer(out)
             else: 
                 out = self.hf_output
                 engine.forward(image.half(), out)
-                image_embeds = self.ln_vision(out).to(device)
+                inputs_llama = self.qformer_output
+                qformer_engine.forward(out.half(), inputs_llama)
+                # image_embeds = self.ln_vision(out).to(device)
 
-            # print(torch.norm(image_embeds - image_embeds_0))
-            image_atts = torch.ones(image_embeds.size()[:-1], dtype=torch.long).to(device)
 
-            query_tokens = self.query_tokens.expand(image_embeds.shape[0], -1, -1)
-            query_output = self.Qformer.bert(
-                query_embeds=query_tokens,
-                encoder_hidden_states=image_embeds,
-                encoder_attention_mask=image_atts,
-                return_dict=True,
-            )
+            # image_atts = torch.ones(image_embeds.size()[:-1], dtype=torch.long).to(device)
+            # query_tokens = self.query_tokens.expand(image_embeds.shape[0], -1, -1)
+            # query_output = self.Qformer.bert(
+            #     query_embeds=query_tokens,
+            #     encoder_hidden_states=image_embeds,
+            #     encoder_attention_mask=image_atts,
+            #     return_dict=True,
+            # )
 
-            inputs_llama = self.llama_proj(query_output.last_hidden_state)
-            atts_llama = torch.ones(inputs_llama.size()[:-1], dtype=torch.long).to(image.device)
-        return inputs_llama, atts_llama
+            # inputs_llama = self.llama_proj(query_output.last_hidden_state)
+            # atts_llama = torch.ones(inputs_llama.size()[:-1], dtype=torch.long).to(image.device)
+        return inputs_llama, None
 
     def prompt_wrap(self, img_embeds, atts_img, prompt):
         if prompt:
@@ -278,3 +287,26 @@ class MiniGPT4(Blip2Base):
             msg = model.load_state_dict(ckpt['model'], strict=False)
 
         return model
+
+class mini_Qformer(nn.Module):
+    def __init__(self, ln_vision, bert, llama_proj, quary_tokens) -> None:
+        super().__init__()
+        self.ln_vision = ln_vision
+        self.bert = bert
+        self.llama_proj = llama_proj
+        self.query_tokens = quary_tokens
+
+    def forward(self, image_embeds):
+        image_embeds = self.ln_vision(image_embeds)
+        image_atts = torch.ones(image_embeds.size()[:-1], dtype=torch.long).to("cuda")
+
+        query_tokens = self.query_tokens.expand(image_embeds.shape[0], -1, -1)
+        query_output = self.bert(
+            query_embeds=query_tokens,
+            encoder_hidden_states=image_embeds,
+            encoder_attention_mask=image_atts,
+            return_dict=True,
+        )
+
+        inputs_llama = self.llama_proj(query_output.last_hidden_state)
+        return inputs_llama

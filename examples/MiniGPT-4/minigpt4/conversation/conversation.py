@@ -135,6 +135,7 @@ class Chat:
         self.vocab_layer.weight.data = self.vocab_weight
         if not self.load_torch:
             self.vit_engine = Engine("./llama_outputs/vit_float16_tp0_rank0.engine")
+            self.qformer_engine = Engine("./llama_outputs/qformer.engine")
             self.llm_trt_engine = Generation(512,
                                             'error',
                                             './llama_outputs',
@@ -142,6 +143,7 @@ class Chat:
                                             1)
         else:
             self.vit_engine = None
+            self.qformer_engine = None
             self.llm_trt_engine = None
     def ask(self, text, conv):
         if len(conv.messages) > 0 and conv.messages[-1][0] == conv.roles[0] \
@@ -160,9 +162,9 @@ class Chat:
             print('Warning: The number of tokens in current conversation exceeds the max length. '
                   'The model will not see the contexts outside the range.')
         begin_idx = max(0, current_max_len - max_length)
-
+        # embs_empty = torch.zeros((1, 128, 4096), dtype=torch.float32).cuda()
         embs = embs[:, begin_idx:]
-        print(embs.size())
+        # embs_empty[:, :embs.shape[1], :embs.shape[2]] = embs
         if not self.load_torch: output_text = self.llm_trt_engine.generate(embs)
         # output_text = generate(512, input_values=embs)
         else :
@@ -201,7 +203,7 @@ class Chat:
                 image = image.unsqueeze(0)
             image = image.to(self.device)
 
-        image_emb, _ = self.model.encode_img(image.half(), self.vit_engine, self.load_torch)
+        image_emb, _ = self.model.encode_img(image.half(), self.vit_engine, self.qformer_engine, self.load_torch)
         img_list.append(image_emb)
         conv.append_message(conv.roles[0], "<Img><ImageHere></Img>")
         msg = "Received."
