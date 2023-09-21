@@ -183,4 +183,10 @@
 ### Bugs
 
 [https://github.com/NVIDIA/trt-samples-for-hackathon-cn/issues/91](https://github.com/NVIDIA/trt-samples-for-hackathon-cn/issues/91) 在8.c修好了
+
 [https://github.com/NVIDIA/trt-samples-for-hackathon-cn/issues/87](https://github.com/NVIDIA/trt-samples-for-hackathon-cn/issues/87)
+
+### 想说的话
+bug实在是太多了，部分warning，error安排不合理，比如unused weight会报错failed to set weight xxx，其实这个weight 已经set，只不过没有在forward使用；如果support format不支持，是否可以指出是哪一个参数不支持，省去打印每一个参数dtype的时间
+转trt模型20%成功率的bug实在是磨人！！！
+cutlass可不可以加个类似cublas，cudnn一样好读的文档！！！
