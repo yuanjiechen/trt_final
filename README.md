@@ -8,7 +8,7 @@
 优化效果：40个测试数据，torch 145 秒，trt 115 秒
 
 1. 完成度：使用trtllm实现新模型，使trtllm支持图片特征输入，在minigpt4上实现rptq(目前进度fake量化可行)，实现rmsnorm plugin，改进smoothquant plugin中存在的bug，找到trtllm的bug
-2. 总结：minigpt4 rptq int8部分工作我们大约进行了半个月的尝试，先后尝试cutlass，cublas两种矩阵计算库，多种参数类型组合，不同plugin参数配置，但是仍然无法得到正确的输出，并不确定是否是trt或者量化过程出现的问题
+2. 总结：minigpt4 rptq int8部分工作我们大约进行了半个月的尝试，先后尝试cutlass，cublas两种矩阵计算库，多种参数类型组合，不同plugin参数配置，但是仍然无法得到正确的输出，并不确定是否是trt或者量化过程出现的问题。如果还有时间，我们会替换原本rptq的量化方法ema-minmax到基本的minmax再做尝试
 
 ### 准备工作
 
