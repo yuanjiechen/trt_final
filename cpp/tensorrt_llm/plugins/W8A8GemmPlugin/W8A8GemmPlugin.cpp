@@ -148,7 +148,7 @@ bool W8A8GemmPlugin::supportsFormatCombination(
         // Weights stored in checkpoint should have int8 type
         // Because of the reinterpretation, input weights have shape 4 times smaller than required
         // in_channels has to be divisible by 4
-        return inOut[pos].type == nvinfer1::DataType::kHALF && inOut[pos].format == TensorFormat::kLINEAR;
+        return inOut[pos].type == nvinfer1::DataType::kINT8 && inOut[pos].format == TensorFormat::kLINEAR;
     case 2:
         // scales channels
     case 3:

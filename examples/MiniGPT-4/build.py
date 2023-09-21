@@ -56,7 +56,7 @@ class Vicuna_args:
     max_input_len = 512
     max_output_len = 1024
     use_apt_attention_plugin = 'float16' # [float32, bfloat16, float16]
-    use_gemm_plugin = False # [float32, bfloat16, float16]
+    use_gemm_plugin = 'float16' # [float32, bfloat16, float16]
     enable_debug_output = False
     builder_opt = None 
     output_dir = 'llama_outputs' # output dir
@@ -65,7 +65,7 @@ class Vicuna_args:
     weight_only_precition = 'int8' #[int8, int4]
     quant_mode = None
     quant_wa = True
-    int8_gemm = True
+    int8_gemm = False
 
 @dataclass
 class ViT_args:
@@ -272,7 +272,7 @@ def build(rank, args:Vicuna_args):
         max_batch_size=args.max_batch_size,
         max_input_len=args.max_input_len,
         max_output_len=args.max_output_len,
-        int8=False,#args.int8_gemm, #args.quant_mode.has_act_and_weight_quant(),
+        int8=args.int8_gemm, #args.quant_mode.has_act_and_weight_quant(),
         opt_level=args.builder_opt,
         multi_query_mode=multi_query_mode)
     engine_name = get_engine_name(MODEL_NAME, args.dtype, 1,
