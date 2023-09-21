@@ -4,30 +4,30 @@ import tensorrt as trt
 from .._common import default_net, default_trtnet
 from .._utils import int32_array, str_dtype_to_trt
 from ..functional import (Tensor, _create_tensor, allgather, allreduce, concat,
-                          constant, matmul, shape, slice, div, unsqueeze)
+                          constant, matmul, shape, slice, div, mul, unsqueeze, constant, mean, round, clip)
 from ..module import Module
 from ..parameter import Parameter
 from ..plugin import _TRT_LLM_PLUGIN_NAMESPACE as TRT_LLM_PLUGIN_NAMESPACE
 
 def _w8a8gemm(input: Tensor, weights: Tensor, scales_a: Tensor,
                       scales_b: Tensor) -> Tensor:
-
+    # fake_scale_A = constant(np.ones([1]).astype(np.float32))
     plg_creator = trt.get_plugin_registry().get_plugin_creator(
         'W8A8Gemm', '1', TRT_LLM_PLUGIN_NAMESPACE)
     assert plg_creator is not None
 
     per_channel_scaling = trt.PluginField(
         "has_per_channel_scaling",
-        np.array(1, dtype=np.int32),
+        np.array(0, dtype=np.int32),
         trt.PluginFieldType.INT32)
 
     per_token_scaling = trt.PluginField(
         "has_per_token_scaling", 
-        np.array(1, dtype=np.int32),
+        np.array(0, dtype=np.int32),
         trt.PluginFieldType.INT32)
 
     pf_type = trt.PluginField(
-        "type_id", np.array([int(trt.float16)], np.int32),
+        "type_id", np.array([int(trt.float32)], np.int32),
         trt.PluginFieldType.INT32)
 
     pfc = trt.PluginFieldCollection(
@@ -39,6 +39,11 @@ def _w8a8gemm(input: Tensor, weights: Tensor, scales_a: Tensor,
     ]
     layer = default_trtnet().add_plugin_v2(plug_inputs, gemm_plug)
     layer.get_input(0).set_dynamic_range(-127, 127)
+    # layer.get_output(0).set_dynamic_range(-1000000, 1000000)
+    # layer.get_input(1).set_dynamic_range(-127, 127)
+    # out = _create_tensor(layer.get_output(0), layer)
+
+    # out = mul(out, unsqueeze(unsqueeze(scales_a, 0), 0))
     return _create_tensor(layer.get_output(0), layer)
 
 def _gemm_plugin(input: Tensor,
@@ -55,7 +60,7 @@ def _gemm_plugin(input: Tensor,
     transb = 1 if transb else 0
     transb = trt.PluginField("transb", np.array(transb, dtype=np.int32),
                              trt.PluginFieldType.INT32)
-    p_dtype = default_net().plugin_config.gemm_plugin
+    p_dtype = 'float16'#default_net().plugin_config.gemm_plugin
     pf_type = trt.PluginField(
         "type_id", np.array([int(str_dtype_to_trt(p_dtype))], np.int32),
         trt.PluginFieldType.INT32)
@@ -86,7 +91,7 @@ class Linear(Module):
         self.int8_gemm = int8_gemm
 
         if not share_weight:
-            self.weight = Parameter(shape=(self.out_features, self.in_features if not self.int8_gemm else self.in_features // 2),
+            self.weight = Parameter(shape=(self.out_features, self.in_features if not self.int8_gemm else self.in_features),
                                     dtype=dtype)
         else:
             self.weight = share_weight
@@ -101,8 +106,8 @@ class Linear(Module):
             self.register_parameter('bias', None)
 
         if int8_gemm:
-            self.scale = Parameter(shape=(out_features, ), dtype=trt.float32)
-            self.scale_A = Parameter(shape=(in_features, ), dtype=trt.float32)
+            self.scale = Parameter(shape=(out_features, 1), dtype=trt.float32)
+            self.scale_A = Parameter(shape=(1, 128, 1), dtype=trt.float32)
         else:
             self.register_parameter("scale", None)
             self.register_parameter("scale_A", None)
@@ -111,7 +116,12 @@ class Linear(Module):
         if default_net().plugin_config.gemm_plugin:
             x = _gemm_plugin(x, self.weight.value, transb=True)
         elif self.int8_gemm:
-            x = _w8a8gemm(div(x, unsqueeze(unsqueeze(self.scale_A.value, 0), 0)).cast(trt.int8), self.weight.value, self.scale.value, self.scale_A.value)
+            x = div(x, self.scale_A.value)
+            x = round(x)
+            x = clip(x, -127, 127)
+            x = x.cast(trt.int8)
+            y = self.weight.value.cast('int8')
+            x = _w8a8gemm(x, y, self.scale_A.value, self.scale.value)
         else:
             x = matmul(x, self.weight.value, transb=True)
 
@@ -159,7 +169,7 @@ class RowLinear(Module):
         self.dtype = dtype
         self.int8_gemm = int8_gemm
 
-        self.weight = Parameter(shape=(self.out_features, self.in_features if not self.int8_gemm else self.in_features // 2),
+        self.weight = Parameter(shape=(self.out_features, self.in_features if not self.int8_gemm else self.in_features),
                                 dtype=dtype)
 
         if bias:
@@ -171,8 +181,8 @@ class RowLinear(Module):
         self.tp_size = tp_size
 
         if int8_gemm:
-            self.scale = Parameter(shape=(out_features, ), dtype=trt.float32)
-            self.scale_A = Parameter(shape=(in_features, ), dtype=trt.float32)
+            self.scale = Parameter(shape=(out_features, 1), dtype=trt.float32)
+            self.scale_A = Parameter(shape=(1, 128, 1), dtype=trt.float32)
         else:
             self.register_parameter("scale", None)
             self.register_parameter("scale_A", None)
@@ -181,7 +191,16 @@ class RowLinear(Module):
         if default_net().plugin_config.gemm_plugin:
             x = _gemm_plugin(x, self.weight.value, transb=True)
         elif self.int8_gemm:
-            x = _w8a8gemm(x, self.weight.value, self.scale.value, self.scale_A.value)
+            x = div(x, self.scale_A.value)
+            x = round(x)
+            x = clip(x, -127, 127)
+            x = x.cast(trt.int8)
+            y = self.weight.value.cast('int8')
+            # x = mul(div(x, self.scale_A.value.view([1, 1, self.scale_A.value.shape[0]])), self.scale_A.value.view([1, 1, self.scale_A.value.shape[0]]))
+            # x = _gemm_plugin(x, y, transb=True)
+            x = _w8a8gemm(x, y, self.scale_A.value, self.scale.value)
+            # x = mul(x, self.scale_A.value)
+            # x = mul(x, self.scale.value.view([1, 1, self.scale.value.shape[0]]))
         else:
             x = matmul(x, self.weight.value, transb=True)
 

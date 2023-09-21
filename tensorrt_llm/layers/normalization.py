@@ -60,7 +60,9 @@ class RmsNorm_reindex(Module):
     def forward(self, x):
         weight = None if self.weight is None else self.weight.value
         if self.quant_wa: 
-            return rms_normquant_reorder(x, self.normalized_shape, weight, dst_index=self.index_input.value, scale=self.scale.value)
+            out = rms_normquant_reorder(x, self.normalized_shape, weight, dst_index=self.index_input.value, scale=self.scale.value)
+            out = index_select(out, 2, self.index_input.value)
+            return out 
         else: 
             out = rms_norm(x, self.normalized_shape, weight, self.eps)
             out = index_select(out, 2, self.index_input.value)
