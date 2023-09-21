@@ -132,6 +132,8 @@
 
 启用了gemm plugin，gpt attention plugin，完成vit，q-former，vicuna-7b模型的转化，40个测试数据，torch 145 秒，trt 115 秒
 
+具体结果可以在主文件夹 torch_output.txt和trt_output.txt查看
+
 ### 送分题答案
 
 1. 从huggingface下载gpt2-median模型，使用hf_gpt_convert.py提取权重参数，再使用build.py生成engine，最后使用run.py —max_otuput_len=8得到输出如下：
