@@ -197,3 +197,5 @@ bug实在是太多了，部分warning，error安排不合理，比如unused weig
 转trt模型20%成功率的bug实在是磨人！！！
 
 cutlass可不可以加个类似cublas，cudnn一样好读的文档！！！
+
+python下增加一份支持自动完成和参数类型检查的东西，不用每调用一个接口就去查文档
