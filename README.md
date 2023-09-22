@@ -22,6 +22,8 @@
 7. 执行./examples/MiniGPT4/preprocess.sh，（由于容器中的tensorrt9.0.0存在bug，有很大机率vit engine生成的是错误的，我们在测试机中没有启用编译vit engine的代码，只编译vicuna-7b，使用之前编译好的vit engine），编译qformer，vicuna-7b （若测试环境为tensorrt9.0.0，不保证不会出现bug，尽量使用已经编译的engine测试，结果是正确的；为了减少出现bug的几率，我们把vit和qformer放在两个engine，实际上是可以放同一个的）。
 执行preprocess.sh会同时输出torch和tensorrt结果并比较。
 8. 上述preprocess.sh执行结果所用的数据为minigpt4官方第二轮训练数据，压缩成npy格式，可以在minigpt4官网查到；我们的模型支持另外两种模式，demo模式和单图片测试模式，demo模式执行 python demo.py --cfg-path eval_configs/minigpt4_eval.yaml --gpi-id 0; 单图片测试模式使用主文件夹下的downlaod.jpg进行测试，执行python test_gpt.py --cfg-path eval_configs/minigpt4_eval.yaml --gpi-id 0;
+以下为demo模式截图，可自行上传图片对话：
+![Screenshot from 2023-09-20 11-16-55](https://github.com/yuanjiechen/trt_final/assets/43607076/706c24ca-951f-434b-afd1-fc29850b7441)
 
 ## 主要开发工作
 
