@@ -4,11 +4,11 @@
 
 介绍本工作是 [NVIDIA TensorRT Hackathon 2023](https://github.com/NVIDIA/trt-samples-for-hackathon-cn/blob/master/Hackathon2023/HackathonGuide.md) 的参赛题目，具体选题是2+4，我们想使用tensorrt-llm实现rptq量化，并使他运行在w4a4精度下
 原模型地址：[https://github.com/hahnyuan/RPTQ4LLM](https://github.com/hahnyuan/RPTQ4LLM)
-这是一个图文对话模型，输入图片和问题，即可和模型进行对话，交流关于图片的内容，模型会记住问答的上下文并理解图片的内容，以下为demo场景图片
+这是一个图文对话模型，输入图片和问题，即可和模型进行对话，交流关于图片的内容，模型会记住问答的上下文并理解图片的内容
 优化效果：40个测试数据，torch 145 秒，trt 115 秒
 
 1. 完成度：使用trtllm实现新模型，使trtllm支持图片特征输入，在minigpt4上实现rptq(目前进度fake量化可行)，实现rmsnorm plugin，改进smoothquant plugin中存在的bug，找到trtllm的bug
-2. 总结：minigpt4 rptq int8部分工作我们大约进行了半个月的尝试，先后尝试cutlass，cublas两种矩阵计算库，多种参数类型组合，不同plugin参数配置，但是仍然无法得到正确的输出，并不确定是否是trt或者量化过程出现的问题。如果还有时间，我们会替换原本rptq的量化方法ema-minmax到基本的minmax再做尝试
+2. 总结：minigpt4 rptq int8部分工作我们大约进行了半个月的尝试，先后尝试cutlass，cublas两种矩阵计算库，多种参数类型组合，不同plugin参数配置，但是仍然无法得到正确的输出，并不确定是否是trt或者量化过程出现的问题。如果还有时间，我们会替换原本rptq的量化方法ema-minmax到基本的minmax再做尝试；同时，我们会在vit上套用fastertransformer+trt以进一步优化vit
 
 ### 准备工作
 
